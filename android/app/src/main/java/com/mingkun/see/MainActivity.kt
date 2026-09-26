@@ -16,6 +16,7 @@ class MainActivity : Activity() {
     private lateinit var scanner: Scanner
     private lateinit var db: Db
     private var retries: Int? = 0
+    private var filePathCallback: android.webkit.ValueCallback<Array<android.net.Uri>>? = null
 
     private val netCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) = refreshNet()
@@ -41,6 +42,23 @@ class MainActivity : Activity() {
         web = WebView(this)
         web.settings.javaScriptEnabled = true
         web.settings.domStorageEnabled = true
+        web.webChromeClient = object : android.webkit.WebChromeClient() {
+            override fun onShowFileChooser(wv: WebView?, cb: android.webkit.ValueCallback<Array<android.net.Uri>>, params: android.webkit.WebChromeClient.FileChooserParams?): Boolean {
+                filePathCallback?.onReceiveValue(null)
+                filePathCallback = cb
+                val pick = android.content.Intent(android.content.Intent.ACTION_GET_CONTENT)
+                pick.addCategory(android.content.Intent.CATEGORY_OPENABLE)
+                pick.type = "image/*"
+                pick.putExtra(android.content.Intent.EXTRA_ALLOW_MULTIPLE, true)
+                return try {
+                    startActivityForResult(android.content.Intent.createChooser(pick, "选择截图"), 1001)
+                    true
+                } catch (e: Exception) {
+                    filePathCallback = null
+                    false
+                }
+            }
+        }
         web.webViewClient = object : android.webkit.WebViewClient() {
             override fun onReceivedError(view: WebView?, req: android.webkit.WebResourceRequest?, err: android.webkit.WebResourceError?) {
                 if (req?.url?.toString()?.startsWith("http://127.0.0.1:5050") == true) {
@@ -51,7 +69,7 @@ class MainActivity : Activity() {
                         web.postDelayed({
                             web.loadDataWithBaseURL(null,
                                 "<html><body style='font-family:sans-serif;padding:24px;line-height:1.6'>" +
-                                "<h2>see v2.0</h2><p>本机服务连接失败</p>" +
+                                "<h2>see v2.1</h2><p>本机服务连接失败</p>" +
                                 "<p style='color:#b02a37;font-size:13px'>" + msg + "</p>" +
                                 "<p style='font-size:12px;color:#666'>点返回键或重新打开应用重试</p></body></html>",
                                 "text/html", "utf-8", null)
@@ -119,6 +137,23 @@ class MainActivity : Activity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         web.saveState(outState)
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        if (requestCode == 1001) {
+            val cb = filePathCallback ?: return
+            filePathCallback = null
+            val uris = ArrayList<android.net.Uri>()
+            if (resultCode == RESULT_OK && data != null) {
+                val clip = data.clipData
+                if (clip != null) for (i in 0 until clip.itemCount) clip.getItemAt(i).uri?.let { u -> uris.add(u) }
+                if (uris.isEmpty()) data.data?.let { u -> uris.add(u) }
+            }
+            cb.onReceiveValue(uris.toTypedArray())
+            return
+        }
+        super.onActivityResult(requestCode, resultCode, data)
     }
 
     override fun onDestroy() {

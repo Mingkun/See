@@ -204,6 +204,13 @@ def _zai_key():
         return None
 
 
+@app.after_request
+def _snap_cors(resp):
+    if request.path == '/api/snapshots/ocr':
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+    return resp
+
+
 @app.post('/api/snapshots/ocr')
 def api_snap_ocr():
     ip = request.remote_addr or '?'
