@@ -82,7 +82,7 @@
       <div class="hint" style="padding:0 0 8px;display:block">选两张或以上截图（手机流量页/路由器统计页，含累计上传/下载量），自动识别并按时间差算出进/出网速。识别需联网。</div>
       <input type="file" id="snapFiles" accept="image/*" multiple style="font-size:12px">
       <div id="snapRows"></div>
-      <button type="button" onclick="snapCalc()" style="margin-top:8px;border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 14px;color:#2563eb;cursor:pointer">计算网速</button>
+      <button type="button" onclick="snapCalc()" style="margin-top:8px;border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 14px;color:#2563eb;cursor:pointer">计算网速<button type="button" onclick="snapClear()" style="margin-top:8px;margin-left:8px;border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 14px;color:#b02a37;cursor:pointer">🗑 清空</button>
       <div id="snapOut"></div>
     </div>
   </div>
@@ -282,6 +282,13 @@ function snapRender(){
       +'</div>';
   });
   document.getElementById('snapRows').innerHTML = html;
+}
+function snapClear(){
+  for (var ci=0;ci<snapItems.length;ci++){ try { URL.revokeObjectURL(snapItems[ci].url); } catch(e){} }
+  snapItems = [];
+  document.getElementById('snapRows').innerHTML = '';
+  document.getElementById('snapOut').innerHTML = '';
+  document.getElementById('snapFiles').value = '';
 }
 function snapCalc(){
   var o = document.getElementById('snapOut');
