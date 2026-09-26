@@ -206,7 +206,7 @@ def _zai_key():
 
 @app.after_request
 def _snap_cors(resp):
-    if request.path == '/api/snapshots/ocr' or request.path == '/downloads/see-version.json':
+    if request.path in ('/api/snapshots/ocr', '/downloads/see-version.json', '/api/gw/report'):
         resp.headers['Access-Control-Allow-Origin'] = '*'
     return resp
 
@@ -239,6 +239,17 @@ def _parse_bytes(txt):
     if mul is None:
         return None
     return int(v * mul)
+
+
+@app.post('/api/gw/report')
+def api_gw_report():
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        with open(os.path.join(ROOT, 'data', 'gw-probes.log'), 'a', encoding='utf-8') as f:
+            f.write(json.dumps({'ts': int(time.time()), 'data': data}, ensure_ascii=False) + '\n')
+    except Exception:
+        pass
+    return jsonify(ok=True)
 
 
 @app.post('/api/snapshots/ocr')

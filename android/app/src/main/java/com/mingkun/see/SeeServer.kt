@@ -6,6 +6,7 @@ import fi.iki.elonen.NanoHTTPD.Response.Status
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
+import java.net.HttpURLConnection
 
 class SeeServer(private val ctx: Context, private val scanner: Scanner, private val phoneIp: String) : NanoHTTPD(5050) {
 
@@ -18,12 +19,52 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
                 "/api/events" -> events(session)
                 "/api/device" -> device(session)
                 "/api/scan" -> scanNow()
+                "/api/gw/probe" -> gwProbe(session)
                 else -> newFixedLengthResponse(Status.NOT_FOUND, "text/plain", "404")
             }
         } catch (e: Exception) {
             newFixedLengthResponse(Status.INTERNAL_ERROR, "application/json",
                 JSONObject().put("ok", false).put("error", "${e.message}").toString())
         }
+    }
+
+    private fun gwProbe(session: IHTTPSession): Response {
+        val map = HashMap<String, String>()
+        session.parseBody(map)
+        val body = map["postData"] ?: ""
+        val ip: String
+        val paths = ArrayList<String>()
+        try {
+            val req = JSONObject(body)
+            ip = req.optString("ip", "192.168.1.1")
+            val arr = req.optJSONArray("paths") ?: JSONArray()
+            for (i in 0 until arr.length()) paths.add(arr.getString(i))
+        } catch (e: Exception) {
+            return newFixedLengthResponse(Status.BAD_REQUEST, "application/json",
+                JSONObject().put("ok", false).put("error", "bad json").toString())
+        }
+        val results = JSONArray()
+        for (path in paths) {
+            val r = JSONObject()
+            r.put("path", path)
+            try {
+                val url = java.net.URL("http://" + ip + path)
+                val conn = url.openConnection() as HttpURLConnection
+                conn.connectTimeout = 4000
+                conn.readTimeout = 4000
+                conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
+                r.put("status", conn.responseCode)
+                val stream = if (conn.responseCode >= 400) conn.errorStream else conn.inputStream
+                val text = stream?.bufferedReader()?.readText() ?: ""
+                r.put("len", text.length)
+                r.put("snippet", text.take(400))
+            } catch (e: Exception) {
+                r.put("status", -1)
+                r.put("err", (e.message ?: "err").take(80))
+            }
+            results.put(r)
+        }
+        return json(JSONObject().put("ok", true).put("results", results))
     }
 
     private fun scanNow(): Response {
@@ -47,7 +88,7 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
             online = scanner.devices.values.count { it.online }
         }
         val o = JSONObject()
-        o.put("ok", true); o.put("mode", "observer"); o.put("iface", "wifi"); o.put("ver", "2.8"); o.put("vercode", 19)
+        o.put("ok", true); o.put("mode", "observer"); o.put("iface", "wifi"); o.put("ver", "2.9"); o.put("vercode", 20)
         o.put("subnet", scanner.subnet); o.put("ip", phoneIp)
         o.put("uptime", System.currentTimeMillis() / 1000 - scanner.startTs)
         o.put("online", online); o.put("devices", total)

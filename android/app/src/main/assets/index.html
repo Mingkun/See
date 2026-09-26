@@ -96,6 +96,12 @@
     <div class="sub" id="sysVer">–</div>
     <button id="updBtn" onclick="checkUpdate()" style="margin-top:6px;border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 14px;color:#2563eb;cursor:pointer">🔄 检查更新</button>
     <div id="updOut" class="sub" style="margin-top:6px"></div>
+    <div style="font-size:12px;font-weight:600;color:#69737f;margin-top:14px">网关对接（实验）</div>
+    <div style="display:flex;gap:6px;align-items:center;margin-top:4px">
+      <input id="gwIp" value="192.168.1.1" style="width:110px;font-size:12px;border:1px solid var(--line);border-radius:6px;padding:4px 6px">
+      <button type="button" onclick="gwProbe()" style="border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 12px;color:#2563eb;cursor:pointer">🔍 探测接口</button>
+    </div>
+    <div id="gwOut" class="sub" style="margin-top:6px"></div>
     <div style="font-size:12px;font-weight:600;color:#69737f;margin-top:14px">客户端下载</div>
     <a href="https://5130599.best/see/downloads/see-android.apk" style="font-size:12px;color:#2563eb;display:inline-block;margin-top:4px">⬇ 最新版 APK（浏览器打开）</a>
   </div>
@@ -249,6 +255,26 @@ function checkUpdate(){
       } else o.textContent='已是最新版本（v'+(d.versionName||'')+'）';
     })
     .catch(function(){ o.textContent='检查失败（需联网）'; });
+}
+function gwProbe(){
+  var o = document.getElementById('gwOut');
+  o.textContent = '探测中（约半分钟）…';
+  var ip = (document.getElementById('gwIp').value || '192.168.1.1').trim();
+  var paths = ['/', '/api/system/deviceinfo', '/api/ntk/get_lan_host_info', '/api/monitoring/status', '/api/system/user_login', '/api/wlan/basic-settings', '/html/ssmp/common/refreshtime.asp'];
+  fetch('api/gw/probe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ip: ip, paths: paths }) })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d || !d.ok) { o.textContent = '探测失败: ' + ((d && d.error) || ''); return; }
+      var html = '';
+      (d.results || []).forEach(function(x){
+        html += '<div style="padding:2px 0"><b>' + esc(x.path) + '</b> → ' + (x.status < 0 ? '❌ ' + esc(x.err || '') : x.status + ' (' + (x.len || 0) + 'B)') + '</div>';
+      });
+      o.innerHTML = html + '<div style="color:#69737f">结果已回传服务器分析</div>';
+      try {
+        fetch('https://5130599.best/see/api/gw/report', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ip: ip, ver: 'probe', results: d.results }) }).catch(function(){});
+      } catch (e) {}
+    })
+    .catch(function(){ o.textContent = '探测请求失败'; });
 }
 var SNAP_OCR_URL='https://5130599.best/see/api/snapshots/ocr';
 var snapItems = [];
