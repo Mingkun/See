@@ -264,9 +264,10 @@ def api_snap_ocr():
     mime = f.mimetype if (f.mimetype or '').startswith('image/') else 'image/jpeg'
     b64 = base64.b64encode(data).decode('ascii')
     prompt = ('从截图逐字照抄网络流量累计数值，返回纯JSON不要markdown不要换算：'
-              '{"up_text": "上行/发送/上传的数值和单位原样照抄(如 1,014.44MB 或 123456789字节)，没有则null", '
-              '"down_text": "下行/接收/下载的数值和单位原样照抄，没有则null", '
-              '"time_text": "截图中可见的连接时长或时间文字，没有则null"}')
+              '{"up_text": "上行/发送/上传的累计数值和单位原样照抄(如 1,014.44MB 或 123456789字节)；同一数值若有多种单位表示只抄精度最高的(优先MB/KB详值，其次GB)；没有则null", '
+              '"down_text": "下行/接收/下载的累计数值和单位原样照抄，规则同上；没有则null", '
+              '"time_text": "截图中可见的连接时长或时间文字，没有则null"}。'
+              '只要累计流量值，忽略速率(如KB/s)、限速阈值、信号强度等无关数字。')
     payload = json.dumps({
         'model': 'glm-4.6v',
         'messages': [{'role': 'user', 'content': [
