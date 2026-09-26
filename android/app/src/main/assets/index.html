@@ -51,7 +51,7 @@
 <div class="wrap">
   <header>
     <h1>📡 see · 局域网监控</h1>
-    <span class="mode" id="mode">…</span>
+    <div style="display:flex;align-items:center;gap:10px"><span class="mode" id="mode">…</span><button id="sysBtn" onclick="openSys()" style="border:none;background:none;font-size:17px;cursor:pointer;color:#69737f;padding:2px 2px;line-height:1">⚙</button></div>
   </header>
   <div class="cards">
     <div class="card"><div class="k">在线设备</div><div class="v" id="cOn">–</div></div>
@@ -85,6 +85,18 @@
   </div>
 </div>
 
+<div id="sysPanel" style="position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:110;display:none;align-items:center;justify-content:center">
+  <div style="width:min(360px,calc(100vw - 32px));max-height:80vh;overflow:auto;background:#fff;border-radius:14px;padding:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><strong style="font-size:15px">系统设置</strong><button onclick="closeSys()" style="border:none;background:none;font-size:22px;cursor:pointer;color:#69737f;line-height:1">×</button></div>
+    <div class="sub" id="sysInfo">–</div>
+    <div style="font-size:12px;font-weight:600;color:#69737f;margin-top:14px">版本与更新</div>
+    <div class="sub" id="sysVer">–</div>
+    <button id="updBtn" onclick="checkUpdate()" style="margin-top:6px;border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 14px;color:#2563eb;cursor:pointer">🔄 检查更新</button>
+    <div id="updOut" class="sub" style="margin-top:6px"></div>
+    <div style="font-size:12px;font-weight:600;color:#69737f;margin-top:14px">客户端下载</div>
+    <a href="https://5130599.best/see/downloads/see-android.apk" style="font-size:12px;color:#2563eb;display:inline-block;margin-top:4px">⬇ 最新版 APK（浏览器打开）</a>
+  </div>
+</div>
 <div id="detail">
   <div class="box">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
@@ -194,6 +206,33 @@ document.getElementById('detail').addEventListener('click',function(e){ if(e.tar
 loadStatus(); loadDevices(); loadEvents();
 setInterval(loadStatus,2000); setInterval(loadDevices,2000); setInterval(loadEvents,5000);
 setInterval(function(){ if(curIp) loadDetail(); },3000);
+var SEE_VERCODE = 0;
+function openSys(){ document.getElementById('sysPanel').style.display='flex'; loadSys(); }
+function closeSys(){ document.getElementById('sysPanel').style.display='none'; }
+document.getElementById('sysPanel').addEventListener('click', function(e){ if(e.target===this) closeSys(); });
+function loadSys(){
+  fetch('api/status').then(function(r){ return r.json(); }).then(function(d){
+    if(!d||!d.ok) return;
+    document.getElementById('sysInfo').textContent = '本机 '+(d.ip||'')+' · 网段 '+(d.subnet||'')+' · :5050';
+    document.getElementById('sysVer').textContent = '当前版本 v'+(d.ver||'');
+    SEE_VERCODE = d.vercode||0;
+  });
+}
+function checkUpdate(){
+  var o = document.getElementById('updOut');
+  o.textContent = '检查中…';
+  fetch('https://5130599.best/see/downloads/see-version.json?t='+Date.now())
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(!d || !d.versionCode){ o.textContent='获取版本信息失败'; return; }
+      if(Number(d.versionCode) > Number(SEE_VERCODE||0)){
+        o.textContent = '发现新版本 v'+d.versionName;
+        if(window.SeeBridge && SeeBridge.confirmUpdate){ SeeBridge.confirmUpdate(String(d.versionName), String(d.apkUrl)); o.textContent='版本 v'+d.versionName+'：确认后开始下载，完成后自动弹出安装'; }
+        else o.textContent='请用浏览器下载：'+d.apkUrl;
+      } else o.textContent='已是最新版本（v'+(d.versionName||'')+'）';
+    })
+    .catch(function(){ o.textContent='检查失败（需联网）'; });
+}
 var SNAP_OCR_URL='https://5130599.best/see/api/snapshots/ocr';
 var snapItems = [];
 function snapPad2(n){ return (n<10?'0':'')+n; }

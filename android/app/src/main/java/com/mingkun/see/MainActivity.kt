@@ -17,6 +17,50 @@ class MainActivity : Activity() {
     private lateinit var db: Db
     private var retries: Int? = 0
     private var filePathCallback: android.webkit.ValueCallback<Array<android.net.Uri>>? = null
+    private var updateDownloadId = -1L
+
+    inner class Bridge {
+        @android.webkit.JavascriptInterface
+        fun confirmUpdate(ver: String, url: String) {
+            runOnUiThread {
+                android.app.AlertDialog.Builder(this@MainActivity)
+                    .setTitle("发现新版本")
+                    .setMessage("see v" + ver + " 可用，下载并安装？")
+                    .setPositiveButton("下载") { _, _ -> downloadAndInstall(url) }
+                    .setNegativeButton("取消", null)
+                    .show()
+            }
+        }
+    }
+
+    private fun downloadAndInstall(url: String) {
+        try {
+            val request = android.app.DownloadManager.Request(android.net.Uri.parse(url))
+            request.setTitle("see 更新")
+            request.setMimeType("application/vnd.android.package-archive")
+            request.addRequestHeader("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
+            request.setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            request.setDestinationInExternalFilesDir(this, null, "see-update.apk")
+            val dm = getSystemService(DOWNLOAD_SERVICE) as android.app.DownloadManager
+            updateDownloadId = dm.enqueue(request)
+        } catch (e: Exception) {
+            try { startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))) } catch (_: Exception) {}
+        }
+    }
+
+    private fun openDownloadedApk() {
+        try {
+            val dir = getExternalFilesDir(null) ?: return
+            val file = java.io.File(dir, "see-update.apk")
+            if (!file.exists()) return
+            val uri = androidx.core.content.FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+            val install = android.content.Intent(android.content.Intent.ACTION_VIEW)
+            install.setDataAndType(uri, "application/vnd.android.package-archive")
+            install.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            install.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(install)
+        } catch (e: Exception) { e.printStackTrace() }
+    }
 
     private val netCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) = refreshNet()
@@ -42,6 +86,7 @@ class MainActivity : Activity() {
         web = WebView(this)
         web.settings.javaScriptEnabled = true
         web.settings.domStorageEnabled = true
+        web.addJavascriptInterface(Bridge(), "SeeBridge")
         web.webChromeClient = object : android.webkit.WebChromeClient() {
             override fun onShowFileChooser(wv: WebView?, cb: android.webkit.ValueCallback<Array<android.net.Uri>>, params: android.webkit.WebChromeClient.FileChooserParams?): Boolean {
                 filePathCallback?.onReceiveValue(null)
@@ -69,7 +114,7 @@ class MainActivity : Activity() {
                         web.postDelayed({
                             web.loadDataWithBaseURL(null,
                                 "<html><body style='font-family:sans-serif;padding:24px;line-height:1.6'>" +
-                                "<h2>see v2.1</h2><p>本机服务连接失败</p>" +
+                                "<h2>see v2.2</h2><p>本机服务连接失败</p>" +
                                 "<p style='color:#b02a37;font-size:13px'>" + msg + "</p>" +
                                 "<p style='font-size:12px;color:#666'>点返回键或重新打开应用重试</p></body></html>",
                                 "text/html", "utf-8", null)
@@ -79,6 +124,12 @@ class MainActivity : Activity() {
             }
         }
         setContentView(web)
+        registerReceiver(object : android.content.BroadcastReceiver() {
+            override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+                val id = intent?.getLongExtra(android.app.DownloadManager.EXTRA_DOWNLOAD_ID, -1L) ?: -1L
+                if (id > 0 && id == updateDownloadId) openDownloadedApk()
+            }
+        }, android.content.IntentFilter(android.app.DownloadManager.ACTION_DOWNLOAD_COMPLETE))
         if (savedInstanceState != null) web.restoreState(savedInstanceState)
         else {
             Thread {
