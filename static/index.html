@@ -70,7 +70,7 @@
     </div>
     <div class="hint" id="netInfo"></div>
   </div>
-  <div style="text-align:center;margin:4px 0 12px"><a href="downloads/see-android-v2.7.apk" style="font-size:12px;color:#2563eb">📱 安卓客户端安装包 v2.7（观察模式）</a></div>
+  <div style="text-align:center;margin:4px 0 12px"><a href="downloads/see-android-v2.8.apk" style="font-size:12px;color:#2563eb">📱 安卓客户端安装包 v2.8（观察模式）</a></div>
   <div class="panel">
     <div class="pt">动态</div>
     <div id="evBody"><div class="hint">加载中…</div></div>
@@ -226,6 +226,16 @@ document.getElementById('snapFiles').addEventListener('change', function(){
   this.value='';
 });
 function snapAttr(v){ return esc(String(v==null?'':v)).split('"').join('&quot;'); }
+function snapGuess(up, down){
+  var KB=1024, MB=1048576;
+  if (down >= 2*MB && up < 100*KB) return '高清视频/大文件下载（视频类App、应用更新、网盘下载）';
+  if (down >= 500*KB && up < 50*KB) return '视频播放为主（抖音/B站/长视频，下载为主上传极少）';
+  if (down >= 100*KB && up < 30*KB) return '刷短视频/图文feed/网页浏览（朋友圈、微博、浏览器）';
+  if (up >= 100*KB && down >= 100*KB) return '双向流量大：视频通话（微信/FaceTime）或直播，也可能是网盘同步';
+  if (up >= 50*KB) return '上传为主：发原图视频/云相册备份/直播推流';
+  if (down < 10*KB && up < 10*KB) return '待机/后台推送（IM心跳、系统同步）';
+  return '一般网络使用（混合场景）';
+}
 function snapParseBytes(t){
   if(!t) return null;
   var m = String(t).match(/([\d,\.]+)\s*(TB|GB|MB|KB|B|字节)?/i);
@@ -280,13 +290,15 @@ function snapCalc(){
     html+='<tr><td class="sub">'+pad2(new Date(a.ts).getHours())+':'+pad2(new Date(a.ts).getMinutes())+' → '+pad2(new Date(b.ts).getHours())+':'+pad2(new Date(b.ts).getMinutes())+'</td>'
       +'<td class="num">'+(dt>=60?(dt/60).toFixed(1)+'分':Math.round(dt)+'秒')+'</td>'
       +'<td class="num up">'+(du<0?'-':fmtSpeed(du/dt))+'</td>'
-      +'<td class="num dn">'+(dd<0?'-':fmtSpeed(dd/dt))+'</td>'+note+'</tr>';
+      +'<td class="num dn">'+(dd<0?'-':fmtSpeed(dd/dt))+'</td>'+note+'</tr>'
+      +((du>=0&&dd>=0&&dt>0)?'<tr><td colspan="4" class="sub" style="padding-top:0;padding-bottom:8px">💭 '+snapGuess(du/dt, dd/dt)+'</td></tr>':'');
     rows++;
   }
   var a0=its[0], b0=its[its.length-1], dtt=(b0.ts-a0.ts)/1000;
   if (dtt>0){
     html+='<tr style="border-top:2px solid var(--line)"><td><b>整体平均</b></td><td class="num">'+(dtt>=60?(dtt/60).toFixed(1)+'分':Math.round(dtt)+'秒')+'</td>'
-      +'<td class="num up"><b>'+fmtSpeed((b0.up-a0.up)/dtt)+'</b></td><td class="num dn"><b>'+fmtSpeed((b0.down-a0.down)/dtt)+'</b></td></tr>';
+      +'<td class="num up"><b>'+fmtSpeed((b0.up-a0.up)/dtt)+'</b></td><td class="num dn"><b>'+fmtSpeed((b0.down-a0.down)/dtt)+'</b></td></tr>'
+      +'<tr><td colspan="4" class="sub" style="padding-top:0;padding-bottom:8px">💭 '+snapGuess((b0.up-a0.up)/dtt, (b0.down-a0.down)/dtt)+'</td></tr>';
   }
   o.innerHTML = html+'</tbody></table><div class="hint" style="padding:6px 0 0;display:block">速度=两截图累计值之差÷时间差；↑为上传(出) ↓为下载(进)</div>';
 }
