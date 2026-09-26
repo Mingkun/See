@@ -268,6 +268,23 @@ document.getElementById('snapFiles').addEventListener('change', function(){
   });
   this.value='';
 });
+function snapAttr(v){ return esc(String(v==null?'':v)).split('"').join('&quot;'); }
+function snapParseBytes(t){
+  if(!t) return null;
+  var m = String(t).match(/([\d,\.]+)\s*(TB|GB|MB|KB|B|字节)?/i);
+  if(!m) return null;
+  var num = m[1], unit = (m[2]||'B').toUpperCase();
+  if(unit==='字节') unit='B';
+  if(num.indexOf(',')>=0){ num = num.split(',').join(''); }
+  else { var dots = num.split('.').length-1;
+    if(dots>1){ var parts = num.split('.');
+      if(parts[parts.length-1].length<=2) num = parts.slice(0,-1).join('')+'.'+parts[parts.length-1];
+      else num = num.split('.').join(''); } }
+  var v = parseFloat(num);
+  if(isNaN(v)) return null;
+  var mul = {B:1,KB:1024,MB:1048576,GB:1073741824,TB:1099511627776}[unit];
+  return mul ? Math.round(v*mul) : null;
+}
 function snapMb(v){ return (v==null||isNaN(v))?'':(v/1048576).toFixed(2); }
 function snapRender(){
   snapItems.sort(function(a,b){ return a.ts-b.ts; });
@@ -276,10 +293,9 @@ function snapRender(){
     html+='<div style="display:flex;gap:5px;align-items:center;padding:7px 0;border-bottom:1px solid #f0f3f7;flex-wrap:wrap">'
       +'<img src="'+it.url+'" style="width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid #e3e8ef">'
       +'<input type="datetime-local" step="1" value="'+snapFmtDT(it.ts)+'" onchange="snapItems['+i+'].ts=new Date(this.value).getTime()" style="flex:1;min-width:150px;font-size:11px;border:1px solid var(--line);border-radius:6px;padding:3px 5px">'
-      +'<span class="sub">↑</span><input type="number" step="0.01" min="0" placeholder="MB" value="'+snapMb(it.up)+'" onchange="snapItems['+i+'].up=isNaN(this.value*1)?null:this.value*1*1048576" style="width:76px;font-size:11px;border:1px solid var(--line);border-radius:6px;padding:3px 5px">'
-      +'<span class="sub">↓</span><input type="number" step="0.01" min="0" placeholder="MB" value="'+snapMb(it.down)+'" onchange="snapItems['+i+'].down=isNaN(this.value*1)?null:this.value*1*1048576" style="width:76px;font-size:11px;border:1px solid var(--line);border-radius:6px;padding:3px 5px">'
+      +'<span class="sub">↑</span><input type="text" placeholder="如1.03GB" value="'+snapAttr(it.upText||(it.up!=null?(it.up/1048576).toFixed(2)+'MB':''))+'" onchange="snapItems['+i+'].upText=this.value;snapItems['+i+'].up=snapParseBytes(this.value)" style="width:88px;font-size:11px;border:1px solid var(--line);border-radius:6px;padding:3px 5px">'
+      +'<span class="sub">↓</span><input type="text" placeholder="如14.22GB" value="'+snapAttr(it.downText||(it.down!=null?(it.down/1048576).toFixed(2)+'MB':''))+'" onchange="snapItems['+i+'].downText=this.value;snapItems['+i+'].down=snapParseBytes(this.value)" style="width:88px;font-size:11px;border:1px solid var(--line);border-radius:6px;padding:3px 5px">'
       +(it.busy?'<span class="sub" style="color:#d97706">识别中…</span>':(it.err?'<span class="sub" style="color:#b02a37">'+esc(it.err)+'</span>':''))
-      +((it.upText||it.downText)?'<div style="width:100%;font-size:10px;color:#9aa4b2;padding-left:46px">识别原文: ↑'+esc(it.upText||'-')+' · ↓'+esc(it.downText||'-')+'</div>':'')
       +'</div>';
   });
   document.getElementById('snapRows').innerHTML = html;
