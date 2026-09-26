@@ -43,18 +43,25 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
             return newFixedLengthResponse(Status.BAD_REQUEST, "application/json",
                 JSONObject().put("ok", false).put("error", "bad json").toString())
         }
+        try {
+            if (java.net.CookieHandler.getDefault() == null) {
+                java.net.CookieHandler.setDefault(java.net.CookieManager())
+            }
+        } catch (e: Exception) {}
         val results = JSONArray()
         for (item in paths) {
             val r = JSONObject()
             var path = ""
             var method = "GET"
             var bodyStr: String? = null
+            var ctype = "application/json"
             try {
                 if (item is org.json.JSONArray) {
-                    // ["路径","方法","body"]
+                    // ["路径","方法","body","content-type"]
                     path = (item as org.json.JSONArray).optString(0, "")
                     method = (item as org.json.JSONArray).optString(1, "GET")
                     bodyStr = (item as org.json.JSONArray).optString(2, "")
+                    ctype = (item as org.json.JSONArray).optString(3, "application/json")
                 } else {
                     path = item.toString()
                 }
@@ -69,7 +76,7 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
                 conn.requestMethod = method
                 if (bodyStr != null && bodyStr.isNotEmpty()) {
                     conn.doOutput = true
-                    conn.setRequestProperty("Content-Type", "application/json")
+                    conn.setRequestProperty("Content-Type", ctype)
                     conn.outputStream.write(bodyStr.toByteArray())
                 }
                 r.put("status", conn.responseCode)
@@ -107,7 +114,7 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
             online = scanner.devices.values.count { it.online }
         }
         val o = JSONObject()
-        o.put("ok", true); o.put("mode", "observer"); o.put("iface", "wifi"); o.put("ver", "2.12"); o.put("vercode", 23)
+        o.put("ok", true); o.put("mode", "observer"); o.put("iface", "wifi"); o.put("ver", "2.13"); o.put("vercode", 24)
         o.put("subnet", scanner.subnet); o.put("ip", phoneIp)
         o.put("uptime", System.currentTimeMillis() / 1000 - scanner.startTs)
         o.put("online", online); o.put("devices", total)

