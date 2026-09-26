@@ -69,10 +69,9 @@
     </div>
     <div class="hint" id="netInfo"></div>
   </div>
-  <div style="text-align:center;margin:4px 0 12px"><a href="downloads/see-android.apk" style="font-size:12px;color:#2563eb">📱 安卓客户端安装包（观察模式）</a></div>
   <div class="panel">
     <div class="pt">动态</div>
-    <div id="evBody"><div class="hint">加载中…</div></div>
+    <div style="text-align:center;padding:10px" class="sub">手机端 · see 观察模式 · 流量统计需网关部署</div><div id="evBody"><div class="hint">加载中…</div></div>
   </div>
 </div>
 
@@ -106,7 +105,7 @@ function loadStatus(){
     document.getElementById('cOn').textContent = d.online + '/' + d.devices;
     document.getElementById('cDn').textContent = fmtSpeed(d.total_speed.down);
     document.getElementById('cUp').textContent = fmtSpeed(d.total_speed.up);
-    document.getElementById('netInfo').textContent = '网卡 '+d.iface+' · 网段 '+d.subnet+(d.mode!=='gateway'?' · 观察模式只能统计接入/在线；流量统计需在网关设备运行':'');
+    document.getElementById('netInfo').textContent = '手机IP '+d.ip+' · 网段 '+d.subnet+' · 观察模式（接入/在线）；同一WiFi其他设备可访问 http://'+(d.ip||'手机IP')+':5050/';
   }).catch(function(){});
 }
 function loadDevices(){
