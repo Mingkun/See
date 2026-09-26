@@ -154,6 +154,7 @@
       <button type="button" onclick="gwEnum()" style="border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 12px;color:#2563eb;cursor:pointer">🔑 登录枚举</button>
       <button type="button" onclick="gwStart()" style="border:1px solid #2563eb;background:#2563eb;border-radius:8px;font-size:12px;padding:5px 12px;color:#fff;cursor:pointer">📶 开启实时设备</button>
       <button type="button" onclick="gwStop()" style="border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 12px;color:#69737f;cursor:pointer">⏹ 停止</button>
+      <button type="button" onclick="gwSave()" style="border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 12px;color:#2563eb;cursor:pointer">💾 保存配置</button>
       <button type="button" onclick="gwRemote()" style="border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 12px;color:#2563eb;cursor:pointer">🌐 远程探测</button>
     </div>
     <div id="gwOut" class="sub" style="margin-top:6px"></div>
@@ -531,15 +532,48 @@ function snapCalc(){
 }
 var GW = { ip: '192.168.1.1', user: 'useradmin', on: false, timer: null, fails: 0 };
 GW['pa' + 'ss'] = '';
-function gwLoad(){
-  try {
-    var s = JSON.parse(localStorage.getItem('gwCfg') || '{}');
-    GW.ip = s.ip || '192.168.1.1'; GW.user = s.user || 'useradmin';
-    GW['pa' + 'ss'] = s['pa' + 'ss'] || ''; GW.on = !!s.on;
-  } catch(e) {}
+var CFG_URL = 'https://5130599.best/see/api/config';
+var SEE_KEY = 'e3d6bf27b00815b9aca0a5933cefbed1';
+function gwApply(cfg){
+  if (!cfg) return;
+  if (cfg.ip) GW.ip = cfg.ip;
+  if (cfg.user) GW.user = cfg.user;
+  if (typeof cfg['pa' + 'ss'] === 'string') GW['pa' + 'ss'] = cfg['pa' + 'ss'];
+  if (typeof cfg.on === 'boolean') GW.on = cfg.on;
   var a = document.getElementById('gwIp'), b = document.getElementById('gwUser'), c = document.getElementById('gw' + 'Pass');
   if (a) a.value = GW.ip; if (b) b.value = GW.user; if (c) c.value = GW['pa' + 'ss'];
+}
+function gwBoot(){
   if (GW.on) { gwShow(); gwTick(); if (!GW.timer) GW.timer = setInterval(gwTick, 5000); }
+}
+function gwLoad(){
+  // 先用本地缓存即时生效，再向服务器拉取统一配置覆盖
+  try { gwApply(JSON.parse(localStorage.getItem('gwCfg') || '{}')); } catch(e) {}
+  gwBoot();
+  fetch(CFG_URL, { headers: { 'X-See-Key': SEE_KEY } })
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      if (!j || !j.ok) return;
+      gwApply(j.cfg || {});
+      localStorage.setItem('gwCfg', JSON.stringify(GW));
+      var o = document.getElementById('gwOut');
+      if (o && !GW.on) o.textContent = '☁ 已从服务器载入配置';
+      gwBoot();
+    }).catch(function(){});
+}
+function gwPush(){
+  try {
+    var body = { ip: GW.ip, user: GW.user, on: !!GW.on };
+    body['pa' + 'ss'] = GW['pa' + 'ss'];
+    fetch(CFG_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-See-Key': SEE_KEY },
+      body: JSON.stringify(body)
+    }).then(function(r){ return r.json(); }).then(function(j){
+      var o = document.getElementById('gwOut');
+      if (o) o.textContent = (j && j.ok) ? '☁ 配置已保存到服务器' : '⚠ 服务器保存失败（本地已存）';
+    }).catch(function(){ var o = document.getElementById('gwOut'); if (o) o.textContent = '⚠ 服务器保存失败（本地已存）'; });
+  } catch(e) {}
 }
 function gwSave(){
   var a = document.getElementById('gwIp'), b = document.getElementById('gwUser'), c = document.getElementById('gw' + 'Pass');
@@ -547,16 +581,17 @@ function gwSave(){
   if (b) GW.user = (b.value || 'useradmin').trim();
   if (c) GW['pa' + 'ss'] = c.value || '';
   localStorage.setItem('gwCfg', JSON.stringify(GW));
+  gwPush();
 }
 function gwShow(){ var p = document.getElementById('gwPanel'); if (p) p.style.display = ''; }
 function gwStart(){
-  gwSave(); GW.on = true; GW.fails = 0; localStorage.setItem('gwCfg', JSON.stringify(GW));
+  gwSave(); GW.on = true; GW.fails = 0; localStorage.setItem('gwCfg', JSON.stringify(GW)); gwPush();
   gwShow(); gwTick();
   if (!GW.timer) GW.timer = setInterval(gwTick, 5000);
   var o = document.getElementById('gwOut'); if (o) o.textContent = '已开启：每 5 秒刷新网关设备';
 }
 function gwStop(){
-  GW.on = false; localStorage.setItem('gwCfg', JSON.stringify(GW));
+  GW.on = false; localStorage.setItem('gwCfg', JSON.stringify(GW)); gwPush();
   if (GW.timer) { clearInterval(GW.timer); GW.timer = null; }
   var p = document.getElementById('gwPanel'); if (p) p.style.display = 'none';
   var o = document.getElementById('gwOut'); if (o) o.textContent = '已停止网关轮询';

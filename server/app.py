@@ -206,9 +206,83 @@ def _zai_key():
 
 @app.after_request
 def _snap_cors(resp):
-    if request.path in ('/api/snapshots/ocr', '/downloads/see-version.json', '/api/gw/report', '/api/gw/plan'):
+    if request.path in ('/api/snapshots/ocr', '/downloads/see-version.json', '/api/gw/report',
+                        '/api/gw/plan', '/api/config'):
         resp.headers['Access-Control-Allow-Origin'] = '*'
+        resp.headers['Access-Control-Allow-Headers'] = 'Content-Type, X-See-Key'
     return resp
+
+
+CFG_PATH = os.path.join(ROOT, 'data', 'gw-config.json')
+KEY_PATH = os.path.join(ROOT, 'data', 'api-key.txt')
+
+
+def _api_key():
+    try:
+        with open(KEY_PATH, encoding='utf-8') as f:
+            k = f.read().strip()
+        if k:
+            return k
+    except Exception:  # noqa: BLE001
+        pass
+    import secrets as _s
+    k = _s.token_hex(16)
+    os.makedirs(os.path.dirname(KEY_PATH), exist_ok=True)
+    with open(KEY_PATH, 'w', encoding='utf-8') as f:
+        f.write(k)
+    try:
+        os.chmod(KEY_PATH, 0o600)
+    except Exception:  # noqa: BLE001
+        pass
+    return k
+
+
+def _load_gwcfg():
+    try:
+        with open(CFG_PATH, encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _save_gwcfg(cfg):
+    os.makedirs(os.path.dirname(CFG_PATH), exist_ok=True)
+    tmp = CFG_PATH + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(cfg, f, ensure_ascii=False)
+    try:
+        os.chmod(tmp, 0o600)
+    except Exception:  # noqa: BLE001
+        pass
+    os.replace(tmp, CFG_PATH)
+
+
+def _cfg_auth():
+    """密钥校验：仅允许持有 X-See-Key 的客户端读写配置。
+    注意：nginx 反代下 remote_addr 恒为 127.0.0.1，不能用本机豁免。"""
+    key = (request.headers.get('X-See-Key') or request.args.get('key') or '').strip()
+    return bool(key) and key == _api_key()
+
+
+@app.route('/api/config', methods=['OPTIONS', 'GET', 'POST'])
+def api_config():
+    if request.method == 'OPTIONS':
+        resp = jsonify(ok=True)
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        resp.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+        resp.headers['Access-Control-Allow-Headers'] = 'Content-Type, X-See-Key'
+        return resp
+    if not _cfg_auth():
+        return jsonify(ok=False, error='unauthorized'), 401
+    if request.method == 'GET':
+        return jsonify(ok=True, cfg=_load_gwcfg())
+    data = request.get_json(force=True, silent=True) or {}
+    cfg = _load_gwcfg()
+    for k in ('ip', 'user', 'pass', 'on'):
+        if k in data:
+            cfg[k] = data[k]
+    _save_gwcfg(cfg)
+    return jsonify(ok=True, cfg=cfg)
 
 
 def _parse_bytes(txt):
