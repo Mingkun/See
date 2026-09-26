@@ -1,6 +1,8 @@
 # coding: utf-8
 """ARP sweep scanner: discover LAN devices, emit join/offline events."""
+import ipaddress
 import socket
+import subprocess
 import threading
 import time
 import urllib.request
@@ -11,11 +13,12 @@ UA = {'User-Agent': 'see-monitor/1.0'}
 
 
 class Scanner(threading.Thread):
-    def __init__(self, store, cidr, iface, interval=10, offline_after=30):
+    def __init__(self, store, cidr, iface, interval=10, offline_after=30, scan_mode='auto'):
         super().__init__(daemon=True)
         self.store = store
         self.cidr = cidr
         self.iface = iface
+        self.scan_mode = scan_mode  # auto | arp | ping
         self.interval = interval
         self.offline_after = offline_after
         self.seen = {}  # mac -> {ip, hostname, vendor, last_seen, online}
@@ -32,18 +35,65 @@ class Scanner(threading.Thread):
 
     # ---------- helpers ----------
     def sweep(self):
+        mode = self.scan_mode
+        if mode in ('arp', 'auto'):
+            try:
+                out = self._sweep_arp()
+                if mode == 'auto':
+                    self.scan_mode = 'arp'
+                return out
+            except PermissionError:
+                if mode == 'arp':
+                    return {}
+                self.scan_mode = 'ping'
+            except Exception as exc:  # noqa: BLE001
+                self.last_error = str(exc)[:120]
+                if mode == 'arp':
+                    return {}
+                self.scan_mode = 'ping'
         try:
-            ans, _ = srp(Ether(dst='ff:ff:ff:ff:ff:ff') / ARP(pdst=self.cidr),
-                         timeout=2, iface=self.iface, verbose=0, inter=0.001)
+            return self._sweep_ping()
         except Exception as exc:  # noqa: BLE001
             self.last_error = str(exc)[:120]
             return {}
+
+    def _sweep_arp(self):
+        ans, _ = srp(Ether(dst='ff:ff:ff:ff:ff:ff') / ARP(pdst=self.cidr),
+                     timeout=2, iface=self.iface, verbose=0, inter=0.001)
         out = {}
         for _, rcv in ans:
             mac = rcv[ARP].hwsrc
             ip = rcv[ARP].psrc
             if mac and mac not in ('00:00:00:00:00:00', 'ff:ff:ff:ff:ff:ff'):
                 out[ip] = mac
+        return out
+
+    def _sweep_ping(self):
+        """免 root 回退：并发 ping 全网段后读 /proc/net/arp（手机 Termux 可用）。"""
+        import concurrent.futures
+        import os
+        devnull = subprocess.DEVNULL
+        hosts = [str(h) for h in ipaddress.ip_network(self.cidr).hosts()]
+
+        def ping(ip):
+            try:
+                subprocess.run(['ping', '-c', '1', '-W', '1', '-n', ip],
+                               stdout=devnull, stderr=devnull, timeout=3)
+            except Exception:  # noqa: BLE001
+                pass
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=64) as ex:
+            list(ex.map(ping, hosts))
+        out = {}
+        try:
+            for line in open('/proc/net/arp', encoding='utf-8', errors='ignore').read().splitlines()[1:]:
+                f = line.split()
+                if len(f) >= 4 and f[2] == '0x2':
+                    ip, hw = f[0], f[3]
+                    if hw and hw != '00:00:00:00:00:00' and os.path.exists('/proc/net/arp'):
+                        out[ip] = hw
+        except Exception:  # noqa: BLE001
+            pass
         return out
 
     def hostname_for(self, ip, cached):

@@ -3,6 +3,7 @@
 import ipaddress
 import json
 import os
+import socket
 import subprocess
 import threading
 import time
@@ -43,7 +44,17 @@ def detect_iface():
 
 def iface_cidr(iface):
     out = sh(f"ip -o addr show dev {iface} | awk '$3==\"inet\" {{print $4}}' | head -1")
-    return out  # e.g. 10.7.0.3/22
+    if out:
+        return out  # e.g. 10.7.0.3/22
+    # Termux 等无 iproute2 环境：UDP 探测本机出口 IP，按 /24 猜测
+    try:
+        sk = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sk.connect(('8.8.8.8', 80))
+        ip = sk.getsockname()[0]
+        sk.close()
+        return ip + '/24'
+    except Exception:  # noqa: BLE001
+        return 
 
 
 cfg = load_config()
@@ -61,7 +72,7 @@ gw_cfg = cfg.get('gateway')
 GATEWAY = bool(ip_forward) if gw_cfg == 'auto' else (gw_cfg is True)
 
 store = store_mod.Store()
-scanner = Scanner(store, SUBNET, IFACE, interval=cfg['scan_interval'], offline_after=cfg['offline_after'])
+scanner = Scanner(store, SUBNET, IFACE, interval=cfg['scan_interval'], offline_after=cfg['offline_after'], scan_mode=cfg.get('scan_mode', 'auto'))
 scanner.prime_known()
 _EXTRA_IPS = {OWN_IP} if OWN_IP else set()
 local_ips = lambda: scanner.local_ips() | _EXTRA_IPS  # noqa: E731
