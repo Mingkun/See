@@ -33,10 +33,12 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
         session.parseBody(map)
         val body = map["postData"] ?: ""
         val ip: String
+        var ml = 3000
         val paths = ArrayList<Any>()
         try {
             val req = JSONObject(body)
             ip = req.optString("ip", "192.168.1.1")
+            ml = Math.max(200, Math.min(req.optInt("maxlen", 3000), 30000))
             val arr = req.optJSONArray("paths") ?: JSONArray()
             for (i in 0 until arr.length()) paths.add(arr.get(i))
         } catch (e: Exception) {
@@ -83,7 +85,7 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
                 val stream = if (conn.responseCode >= 400) conn.errorStream else conn.inputStream
                 val text = stream?.bufferedReader()?.readText() ?: ""
                 r.put("len", text.length)
-                r.put("snippet", text.take(1500))
+                r.put("snippet", text.take(ml))
             } catch (e: Exception) {
                 r.put("status", -1)
                 r.put("err", (e.message ?: "err").take(80))
@@ -114,7 +116,7 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
             online = scanner.devices.values.count { it.online }
         }
         val o = JSONObject()
-        o.put("ok", true); o.put("mode", "observer"); o.put("iface", "wifi"); o.put("ver", "2.13"); o.put("vercode", 24)
+        o.put("ok", true); o.put("mode", "observer"); o.put("iface", "wifi"); o.put("ver", "2.14"); o.put("vercode", 25)
         o.put("subnet", scanner.subnet); o.put("ip", phoneIp)
         o.put("uptime", System.currentTimeMillis() / 1000 - scanner.startTs)
         o.put("online", online); o.put("devices", total)

@@ -206,7 +206,7 @@ def _zai_key():
 
 @app.after_request
 def _snap_cors(resp):
-    if request.path in ('/api/snapshots/ocr', '/downloads/see-version.json', '/api/gw/report'):
+    if request.path in ('/api/snapshots/ocr', '/downloads/see-version.json', '/api/gw/report', '/api/gw/plan'):
         resp.headers['Access-Control-Allow-Origin'] = '*'
     return resp
 
@@ -239,6 +239,25 @@ def _parse_bytes(txt):
     if mul is None:
         return None
     return int(v * mul)
+
+
+@app.route('/api/gw/plan', methods=['OPTIONS', 'POST'])
+def api_gw_plan():
+    if request.method == 'OPTIONS':
+        resp = jsonify(ok=True)
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        resp.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        return resp
+    try:
+        with open(os.path.join(ROOT, 'data', 'gw-plan.json'), encoding='utf-8') as f:
+            plan = json.load(f)
+    except Exception:
+        plan = {'steps': []}
+    resp = jsonify(plan)
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
 
 
 @app.route('/api/gw/report', methods=['OPTIONS'])

