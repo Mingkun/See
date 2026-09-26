@@ -211,6 +211,36 @@ def _snap_cors(resp):
     return resp
 
 
+def _parse_bytes(txt):
+    import re
+    if not txt:
+        return None
+    m = re.search(r'([\d,\.]+)\s*(TB|GB|MB|KB|B|字节)?', str(txt), re.I)
+    if not m:
+        return None
+    num, unit = m.group(1), (m.group(2) or 'B').upper()
+    if unit == '字节':
+        unit = 'B'
+    if ',' in num and '.' in num:
+        num = num.replace(',', '')
+    elif ',' in num:
+        num = num.replace(',', '')
+    elif num.count('.') > 1:
+        parts = num.split('.')
+        if len(parts[-1]) <= 2:
+            num = ''.join(parts[:-1]) + '.' + parts[-1]
+        else:
+            num = num.replace('.', '')
+    try:
+        v = float(num)
+    except Exception:
+        return None
+    mul = {'B': 1, 'KB': 1024, 'MB': 1024 ** 2, 'GB': 1024 ** 3, 'TB': 1024 ** 4}.get(unit)
+    if mul is None:
+        return None
+    return int(v * mul)
+
+
 @app.post('/api/snapshots/ocr')
 def api_snap_ocr():
     ip = request.remote_addr or '?'
@@ -233,10 +263,10 @@ def api_snap_ocr():
         return jsonify(ok=False, error='图片无效或超过8MB'), 400
     mime = f.mimetype if (f.mimetype or '').startswith('image/') else 'image/jpeg'
     b64 = base64.b64encode(data).decode('ascii')
-    prompt = ('提取这张截图中网络流量相关的累计数据。返回纯JSON不要markdown：'
-              '{"up_bytes": 上行/发送/上传累计字节数(整数,按1KB=1024进位换算,图中没有则null), '
-              '"down_bytes": 下行/接收/下载累计字节数(整数,没有则null), '
-              '"time_text": "截图中可见的时间或日期文字,没有则null"}')
+    prompt = ('从截图逐字照抄网络流量累计数值，返回纯JSON不要markdown不要换算：'
+              '{"up_text": "上行/发送/上传的数值和单位原样照抄(如 1,014.44MB 或 123456789字节)，没有则null", '
+              '"down_text": "下行/接收/下载的数值和单位原样照抄，没有则null", '
+              '"time_text": "截图中可见的连接时长或时间文字，没有则null"}')
     payload = json.dumps({
         'model': 'glm-4.6v',
         'messages': [{'role': 'user', 'content': [
@@ -261,13 +291,8 @@ def api_snap_ocr():
         parsed = json.loads(t)
     except Exception:
         parsed = {'up_bytes': None, 'down_bytes': None, 'time_text': text[:120]}
-    up, down = parsed.get('up_bytes'), parsed.get('down_bytes')
-    try:
-        up = int(up) if up is not None else None
-    except Exception:
-        up = None
-    try:
-        down = int(down) if down is not None else None
-    except Exception:
-        down = None
-    return jsonify(ok=True, up=up, down=down, time_text=parsed.get('time_text'), raw=text[:300])
+    up = _parse_bytes(parsed.get('up_text'))
+    down = _parse_bytes(parsed.get('down_text'))
+    return jsonify(ok=True, up=up, down=down,
+                   up_text=parsed.get('up_text'), down_text=parsed.get('down_text'),
+                   time_text=parsed.get('time_text'), raw=text[:300])
