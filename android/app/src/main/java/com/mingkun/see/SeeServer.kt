@@ -212,12 +212,16 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
                 val o = arr.getJSONObject(i)
                 present[o.optString("key")] = o
             }
+            val seen = HashSet<String>()
+            for ((pk, d) in present) {
+                if (pk.isEmpty()) continue
+                seen.add(pk)
+                db.addSample(nowSec, pk, d.optString("name"), d.optString("ip"), 1,
+                    d.optDouble("up", 0.0), d.optDouble("down", 0.0))
+            }
+            // 近 25 小时内出现过、但当前不在网关列表里的设备 → 休眠/离线（present=0）
             for (k in db.gwKeys(nowSec - 90000)) {
-                val d = present[k[0]]
-                if (d != null) {
-                    db.addSample(nowSec, k[0], d.optString("name"), d.optString("ip"), 1,
-                        d.optDouble("up", 0.0), d.optDouble("down", 0.0))
-                } else {
+                if (!seen.contains(k[0])) {
                     db.addSample(nowSec, k[0], k[1], k[2], 0, 0.0, 0.0)
                 }
             }
@@ -307,7 +311,7 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
             online = scanner.devices.values.count { it.online }
         }
         val o = JSONObject()
-        o.put("ok", true); o.put("mode", "observer"); o.put("iface", "wifi"); o.put("ver", "2.18"); o.put("vercode", 29)
+        o.put("ok", true); o.put("mode", "observer"); o.put("iface", "wifi"); o.put("ver", "2.19"); o.put("vercode", 30)
         o.put("subnet", scanner.subnet); o.put("ip", phoneIp)
         o.put("uptime", System.currentTimeMillis() / 1000 - scanner.startTs)
         o.put("online", online); o.put("devices", total)
