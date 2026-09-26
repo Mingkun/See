@@ -28,6 +28,8 @@ class MainActivity : Activity() {
         db = Db(this)
         scanner = Scanner(db)
         scanner.subnet = detectSubnet()
+        scanner.selfIp = localIp()
+        scanner.gateway = gwIp()
         server = SeeServer(this, scanner, localIp())
         server.start()
         scanner.start()
@@ -49,7 +51,7 @@ class MainActivity : Activity() {
                         web.postDelayed({
                             web.loadDataWithBaseURL(null,
                                 "<html><body style='font-family:sans-serif;padding:24px;line-height:1.6'>" +
-                                "<h2>see v1.7</h2><p>本机服务连接失败</p>" +
+                                "<h2>see v1.8</h2><p>本机服务连接失败</p>" +
                                 "<p style='color:#b02a37;font-size:13px'>" + msg + "</p>" +
                                 "<p style='font-size:12px;color:#666'>点返回键或重新打开应用重试</p></body></html>",
                                 "text/html", "utf-8", null)
@@ -72,6 +74,20 @@ class MainActivity : Activity() {
     private fun refreshNet() {
         val s = detectSubnet()
         if (s.isNotBlank()) scanner.subnet = s
+        val g = gwIp()
+        if (g.isNotBlank()) scanner.gateway = g
+    }
+
+    private fun gwIp(): String {
+        return try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val lp = cm.getLinkProperties(cm.activeNetwork) ?: return ""
+            for (r in lp.routes) {
+                val g = r.gateway?.hostAddress
+                if (!g.isNullOrEmpty()) return g
+            }
+            ""
+        } catch (_: Exception) { "" }
     }
 
     private fun ipInfo(): Pair<String, Int>? {

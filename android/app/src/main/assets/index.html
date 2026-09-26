@@ -122,7 +122,7 @@ function loadDevices(){
       day += (v.today.up||0)+(v.today.down||0);
       html+='<tr class="dev" data-ip="'+esc(v.ip)+'">'
         +'<td><span class="dot'+(v.online?' on':'')+'"></span></td>'
-        +'<td><div class="name">'+esc(v.hostname||v.ip)+'</div><div class="sub">'+esc(v.ip)+' · '+esc(v.mac)+'</div></td>'
+        +'<td><div class="name">'+esc(v.hostname||v.type||v.ip)+'</div><div class="sub">'+esc([v.ip, v.hostname?(v.type||''):'', v.mac].filter(Boolean).join(' · '))+'</div></td>'
         +'<td class="sub">'+esc(v.vendor||'')+'</td>'
         +'<td class="num dn">'+fmtSpeed(v.speed.down)+'</td>'
         +'<td class="num up">'+fmtSpeed(v.speed.up)+'</td>'
@@ -157,7 +157,7 @@ function loadDetail(){
     if(!d||!d.ok) return;
     var v=d.device;
     document.getElementById('dTitle').textContent=v.hostname||v.ip;
-    document.getElementById('dInfo').textContent=v.ip+' · '+v.mac+(v.vendor?' · '+v.vendor:'')+(v.online?' · 在线':' · 离线')+' · 今日 ↓'+fmtBytes(d.today.down)+' ↑'+fmtBytes(d.today.up);
+    document.getElementById('dInfo').textContent=(v.type?v.type+' · ':'')+v.ip+' · '+v.mac+(v.vendor?' · '+v.vendor:'')+(v.online?' · 在线':' · 离线')+' · 今日 ↓'+fmtBytes(d.today.down)+' ↑'+fmtBytes(d.today.up);
     var ch=document.getElementById('dChart'), s=d.series||[], n=s.length;
     if(!n){ ch.innerHTML='<div class="hint" style="flex:1">暂无数据（需网关模式）</div>'; }
     else{

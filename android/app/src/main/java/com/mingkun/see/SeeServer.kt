@@ -47,7 +47,7 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
             online = scanner.devices.values.count { it.online }
         }
         val o = JSONObject()
-        o.put("ok", true); o.put("mode", "observer"); o.put("iface", "wifi"); o.put("ver", "1.7")
+        o.put("ok", true); o.put("mode", "observer"); o.put("iface", "wifi"); o.put("ver", "1.8")
         o.put("subnet", scanner.subnet); o.put("ip", phoneIp)
         o.put("uptime", System.currentTimeMillis() / 1000 - scanner.startTs)
         o.put("online", online); o.put("devices", total)
@@ -63,7 +63,7 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
             for ((mac, d) in scanner.devices) {
                 val v = JSONObject()
                 v.put("mac", if (mac.startsWith("ip:")) "" else mac); v.put("ip", d.ip); v.put("hostname", d.hostname)
-                v.put("vendor", d.vendor); v.put("online", d.online); v.put("last_seen", d.lastSeen)
+                v.put("vendor", d.vendor); v.put("type", d.type); v.put("online", d.online); v.put("last_seen", d.lastSeen)
                 v.put("speed", zeros()); v.put("session", zeros()); v.put("today", zeros())
                 arr.put(v)
             }
@@ -99,9 +99,9 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
         val v = JSONObject()
         if (dev != null) {
             v.put("mac", if (mac.startsWith("ip:")) "" else mac); v.put("ip", ip); v.put("hostname", dev!!.hostname)
-            v.put("vendor", dev!!.vendor); v.put("online", dev!!.online); v.put("last_seen", dev!!.lastSeen)
+            v.put("vendor", dev!!.vendor); v.put("type", dev!!.type); v.put("online", dev!!.online); v.put("last_seen", dev!!.lastSeen)
         } else {
-            v.put("mac", ""); v.put("ip", ip); v.put("hostname", ""); v.put("vendor", "")
+            v.put("mac", ""); v.put("ip", ip); v.put("hostname", ""); v.put("vendor", ""); v.put("type", "")
             v.put("online", false); v.put("last_seen", 0)
         }
         return json(JSONObject().put("ok", true).put("device", v)

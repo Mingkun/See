@@ -10,10 +10,12 @@ import kotlin.concurrent.thread
 
 class Scanner(private val db: Db) : Thread() {
 
-    data class Dev(var ip: String, var hostname: String, var vendor: String, var lastSeen: Long, var online: Boolean)
+    data class Dev(var ip: String, var hostname: String, var vendor: String, var lastSeen: Long, var online: Boolean, var type: String = "")
     data class Ev(val ts: Long, val type: String, val ip: String, val mac: String, val hostname: String)
 
     @Volatile var subnet: String = ""   // 192.168.1.0/24
+    @Volatile var gateway: String = ""
+    @Volatile var selfIp: String = ""
     val devices = LinkedHashMap<String, Dev>()
     val events = mutableListOf<Ev>()
     val lock = Any()
@@ -66,7 +68,49 @@ class Scanner(private val db: Db) : Thread() {
         for ((ip, mac) in arp) found[ip] = mac
         for (ip in alive) if (!found.containsKey(ip)) found[ip] = "ip:$ip"
         merge(found)
+        probeTypes()
         lastSweep = System.currentTimeMillis() / 1000
+    }
+
+    private val probePorts = listOf(
+        62078 to "📱 iPhone/iPad", 8000 to "📷 海康摄像头", 37777 to "📷 大华摄像头", 554 to "📷 摄像头",
+        9100 to "🖨 打印机", 631 to "🖨 打印机", 5000 to "🗄 NAS", 5001 to "🗄 NAS",
+        3000 to "📺 LG电视", 3001 to "📺 LG电视", 2179 to "📺 Chromecast", 8009 to "📺 Chromecast",
+        548 to "💻 Mac", 3689 to "💻 Mac", 445 to "💻 Windows", 139 to "💻 Windows", 3389 to "💻 Windows",
+        5555 to "📱 Android"
+    )
+
+    private fun probeTypes() {
+        val targets = synchronized(lock) {
+            devices.entries.filter { it.value.online && it.value.type.isEmpty() }
+                .map { it.key to it.value.ip }
+        }
+        if (targets.isEmpty()) return
+        val pool = Executors.newFixedThreadPool(12)
+        for ((key, ip) in targets) pool.execute {
+            val t = probeIp(ip)
+            if (t.isNotEmpty()) synchronized(lock) { devices[key]?.type = t }
+        }
+        pool.shutdown()
+        try { pool.awaitTermination(10, TimeUnit.SECONDS) } catch (_: Exception) {}
+    }
+
+    private fun probeIp(ip: String): String {
+        val hits = java.util.Collections.synchronizedList(mutableListOf<Int>())
+        val sub = Executors.newFixedThreadPool(probePorts.size)
+        probePorts.forEachIndexed { i, pp ->
+            sub.execute {
+                try {
+                    val s = java.net.Socket()
+                    s.connect(java.net.InetSocketAddress(ip, pp.first), 400)
+                    s.close()
+                    hits.add(i)
+                } catch (_: Exception) {}
+            }
+        }
+        sub.shutdown()
+        try { sub.awaitTermination(2, TimeUnit.SECONDS) } catch (_: Exception) {}
+        return hits.minOrNull()?.let { probePorts[it].second } ?: ""
     }
 
     private fun ping(ip: String): Boolean = try {
@@ -103,7 +147,11 @@ class Scanner(private val db: Db) : Thread() {
                     thread {
                         val h = hostname(ip)
                         val v = if (hasMac) vendor(mac) else ""
-                        synchronized(lock) { devices[mac]?.let { it.hostname = h; it.vendor = v } }
+                        synchronized(lock) {
+                            devices[mac]?.let { it.hostname = h; it.vendor = v }
+                            val dv = devices[mac]
+                            if (h.startsWith("android-", true) && (dv?.type ?: "").isEmpty()) dv?.type = "📱 Android"
+                        }
                         db.upsert(mac, ip, h, v, now)
                     }
                     if (mac !in knownMacs) {
@@ -115,6 +163,12 @@ class Scanner(private val db: Db) : Thread() {
                     d.ip = ip; d.lastSeen = now; d.online = true
                     db.upsert(mac, ip, d.hostname, d.vendor, now)
                     if (wasOffline && d.lastSeen > 0) addEventLocked("online", ip, mac, d.hostname)
+                }
+                devices[mac]?.let { dv ->
+                    if (dv.type.isEmpty()) {
+                        if (gateway.isNotEmpty() && ip == gateway) dv.type = "🌐 路由器"
+                        else if (selfIp.isNotEmpty() && ip == selfIp) dv.type = "📱 本机"
+                    }
                 }
             }
             for ((mac, d) in devices) {
