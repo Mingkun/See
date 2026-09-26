@@ -21,6 +21,16 @@ class MainActivity : Activity() {
 
     inner class Bridge {
         @android.webkit.JavascriptInterface
+        fun gwBg(on: Boolean) {
+            try {
+                if (on) GwService.start(this@MainActivity) else GwService.stop(this@MainActivity)
+            } catch (_: Exception) {}
+        }
+
+        @android.webkit.JavascriptInterface
+        fun gwBgOn(): Boolean = GwService.running
+
+        @android.webkit.JavascriptInterface
         fun confirmUpdate(ver: String, url: String) {
             runOnUiThread {
                 android.app.AlertDialog.Builder(this@MainActivity)

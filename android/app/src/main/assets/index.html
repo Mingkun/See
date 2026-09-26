@@ -544,7 +544,10 @@ function gwApply(cfg){
   if (a) a.value = GW.ip; if (b) b.value = GW.user; if (c) c.value = GW['pa' + 'ss'];
 }
 function gwBoot(){
-  if (GW.on) { gwShow(); gwTick(); if (!GW.timer) GW.timer = setInterval(gwTick, 5000); }
+  if (GW.on) {
+    gwShow(); gwTick(); if (!GW.timer) GW.timer = setInterval(gwTick, 5000);
+    try { if (window.SeeBridge && SeeBridge.gwBg) SeeBridge.gwBg(true); } catch(e) {}
+  }
 }
 function gwLoad(){
   // 先用本地缓存即时生效，再向服务器拉取统一配置覆盖
@@ -588,13 +591,15 @@ function gwStart(){
   gwSave(); GW.on = true; GW.fails = 0; localStorage.setItem('gwCfg', JSON.stringify(GW)); gwPush();
   gwShow(); gwTick();
   if (!GW.timer) GW.timer = setInterval(gwTick, 5000);
-  var o = document.getElementById('gwOut'); if (o) o.textContent = '已开启：每 5 秒刷新网关设备';
+  try { if (window.SeeBridge && SeeBridge.gwBg) SeeBridge.gwBg(true); } catch(e) {}
+  var o = document.getElementById('gwOut'); if (o) o.textContent = '已开启：前台服务常驻采集，关掉界面也会继续';
 }
 function gwStop(){
   GW.on = false; localStorage.setItem('gwCfg', JSON.stringify(GW)); gwPush();
   if (GW.timer) { clearInterval(GW.timer); GW.timer = null; }
+  try { if (window.SeeBridge && SeeBridge.gwBg) SeeBridge.gwBg(false); } catch(e) {}
   var p = document.getElementById('gwPanel'); if (p) p.style.display = 'none';
-  var o = document.getElementById('gwOut'); if (o) o.textContent = '已停止网关轮询';
+  var o = document.getElementById('gwOut'); if (o) o.textContent = '已停止采集（后台服务已关）';
 }
 function gwDur(s){
   if (!s) return '—';
@@ -643,25 +648,26 @@ function gwTick(){
 }
 var AN = { key: '', last: null };
 function anInit(){
-  if (!GW.on && GW['pa' + 'ss']) { try { gwStart(); } catch(e) {} }
   var sel = document.getElementById('anDev');
   if (!sel || !sel.options.length || (sel.options.length === 1 && !sel.value)) anKeys();
   else anLoad();
 }
 function anKeys(){
-  fetch('api/gw/keys').then(function(r){ return r.json(); }).then(function(j){
-    var sel = document.getElementById('anDev');
-    if (!sel) return;
-    var ks = (j && j.keys) || [];
-    if (!ks.length) { sel.innerHTML = '<option value="">暂无设备 · 先在 ⚙ 开启实时设备采集</option>'; document.getElementById('anSub').textContent = ''; return; }
-    ks.sort(function(a, b){ return String(a.name || a.ip).localeCompare(String(b.name || b.ip)); });
-    sel.innerHTML = ks.map(function(k){
-      var lbl = (k.name || k.ip || k.key) + (k.name && k.ip ? ' · ' + k.ip : '');
-      return '<option value="' + esc(k.key) + '">' + esc(lbl) + '</option>';
-    }).join('');
-    if (AN.key) { try { sel.value = AN.key; } catch(e) {} }
-    anLoad();
-  }).catch(function(){ document.getElementById('anSub').textContent = '设备列表读取失败'; });
+  fetch('https://5130599.best/see/api/gw/keys?days=7&key=' + encodeURIComponent(SEE_KEY))
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      var sel = document.getElementById('anDev');
+      if (!sel) return;
+      var ks = (j && j.keys) || [];
+      if (!ks.length) { sel.innerHTML = '<option value="">暂无采样数据 · 先在 ⚙ 开启实时设备（后台会持续采集）</option>'; document.getElementById('anSub').textContent = '服务器上还没有该设备的采样'; return; }
+      ks.sort(function(a, b){ return String(a.name || a.ip).localeCompare(String(b.name || b.ip)); });
+      sel.innerHTML = ks.map(function(k){
+        var lbl = (k.name || k.ip || k.key) + (k.name && k.ip ? ' · ' + k.ip : '');
+        return '<option value="' + esc(k.key) + '">' + esc(lbl) + '</option>';
+      }).join('');
+      if (AN.key) { try { sel.value = AN.key; } catch(e) {} }
+      anLoad();
+    }).catch(function(){ document.getElementById('anSub').textContent = '服务器设备列表读取失败'; });
 }
 function anLoad(){
   var sel = document.getElementById('anDev');
@@ -670,10 +676,10 @@ function anLoad(){
   if (!sel || !sel.value) { document.getElementById('anSub').textContent = '请选择设备'; return; }
   AN.key = sel.value;
   document.getElementById('anSub').textContent = '加载中…';
-  fetch('api/gw/analysis', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: AN.key, hours: hrs }) })
+  fetch('https://5130599.best/see/api/gw/series?key=' + encodeURIComponent(SEE_KEY) + '&dev=' + encodeURIComponent(AN.key) + '&hours=' + hrs)
     .then(function(r){ return r.json(); })
     .then(function(j){ if (!j || !j.ok) { document.getElementById('anSub').textContent = '❌ ' + ((j && j.error) || '失败'); return; } anRender(j); })
-    .catch(function(){ document.getElementById('anSub').textContent = '连接失败'; });
+    .catch(function(){ document.getElementById('anSub').textContent = '服务器连接失败'; });
 }
 var AN_THR = 4096;
 function anHMin(sec){ var d = new Date(sec * 1000); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
@@ -682,7 +688,7 @@ function anRender(j){
   AN.last = j;
   var sp = j.speed || [], pr = j.present || [], hs = j.has || [];
   var n = sp.length || j.minutes || 1440;
-  var from = j.from || 0;
+  var from = j.frm || j.from || 0;
   var svg = document.getElementById('anChart');
   var W = svg.clientWidth || 340, H = svg.clientHeight || 190;
   svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);

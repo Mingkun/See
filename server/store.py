@@ -29,6 +29,11 @@ class Store:
             CREATE TABLE IF NOT EXISTS traffic_min(
                 minute INTEGER, ip TEXT, up INTEGER DEFAULT 0, down INTEGER DEFAULT 0,
                 PRIMARY KEY(minute, ip));
+            CREATE TABLE IF NOT EXISTS gw_samples(
+                ts INTEGER, devkey TEXT, name TEXT DEFAULT '', ip TEXT DEFAULT '',
+                present INTEGER DEFAULT 0, up REAL DEFAULT 0, down REAL DEFAULT 0);
+            CREATE INDEX IF NOT EXISTS idx_gws_key_ts ON gw_samples(devkey, ts);
+            CREATE INDEX IF NOT EXISTS idx_gws_ts ON gw_samples(ts);
             ''')
             self._db.commit()
 
@@ -98,3 +103,43 @@ class Store:
             rows = self._db.execute(
                 'SELECT ip, SUM(up) u, SUM(down) d FROM traffic_min WHERE minute>=? GROUP BY ip', (start,)).fetchall()
         return {r['ip']: {'up': r['u'], 'down': r['d']} for r in rows}
+
+    # ---------- 网关设备流量采样（app 上传）----------
+    def add_gw_samples(self, rows):
+        """rows: iterable of (ts, devkey, name, ip, present, up, down)"""
+        vals = []
+        for r in rows:
+            try:
+                ts = int(r[0]); key = str(r[1])[:64]
+                name = str(r[2] or '')[:64]; ip = str(r[3] or '')[:64]
+                present = 1 if r[4] else 0
+                up = float(r[5] or 0); down = float(r[6] or 0)
+            except Exception:  # noqa: BLE001
+                continue
+            if not key or ts <= 0:
+                continue
+            vals.append((ts, key, name, ip, present, up, down))
+        if not vals:
+            return 0
+        with self._lock:
+            self._db.executemany(
+                'INSERT INTO gw_samples(ts, devkey, name, ip, present, up, down) VALUES(?,?,?,?,?,?,?)', vals)
+            self._db.commit()
+        return len(vals)
+
+    def gw_keys(self, since):
+        with self._lock:
+            return [dict(r) for r in self._db.execute(
+                'SELECT devkey AS key, MAX(name) name, MAX(ip) ip, MAX(ts) last_ts'
+                ' FROM gw_samples WHERE ts>=? GROUP BY devkey ORDER BY last_ts DESC', (int(since),))]
+
+    def gw_series(self, devkey, frm, to):
+        with self._lock:
+            return [dict(r) for r in self._db.execute(
+                'SELECT ts, present, up, down FROM gw_samples WHERE devkey=? AND ts>=? AND ts<? ORDER BY ts',
+                (devkey, int(frm), int(to)))]
+
+    def prune_gw_samples(self, before):
+        with self._lock:
+            self._db.execute('DELETE FROM gw_samples WHERE ts<?', (int(before),))
+            self._db.commit()

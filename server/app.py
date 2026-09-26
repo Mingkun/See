@@ -18,6 +18,7 @@ from sniffer import TrafficMonitor
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 START_TS = time.time()
+_LAST_PRUNE = [0.0]
 
 
 def load_config():
@@ -283,6 +284,90 @@ def api_config():
             cfg[k] = data[k]
     _save_gwcfg(cfg)
     return jsonify(ok=True, cfg=cfg)
+
+
+# ---------- 网关设备流量采样（app 上传 / 网页读取）----------
+
+@app.route('/api/gw/samples', methods=['OPTIONS', 'POST'])
+def api_gw_samples():
+    if request.method == 'OPTIONS':
+        resp = jsonify(ok=True)
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        resp.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        resp.headers['Access-Control-Allow-Headers'] = 'Content-Type, X-See-Key'
+        return resp
+    if not _cfg_auth():
+        return jsonify(ok=False, error='unauthorized'), 401
+    data = request.get_json(force=True, silent=True) or {}
+    rows = data.get('samples') or []
+    n = store.add_gw_samples(rows[:2000])
+    # 顺带清理 30 天前的采样
+    try:
+        if time.time() - _LAST_PRUNE[0] > 3600:
+            _LAST_PRUNE[0] = time.time()
+            store.prune_gw_samples(int(time.time()) - 30 * 86400)
+    except Exception:  # noqa: BLE001
+        pass
+    return jsonify(ok=True, n=n)
+
+
+@app.route('/api/gw/keys', methods=['OPTIONS', 'GET'])
+def api_gw_keys():
+    if request.method == 'OPTIONS':
+        resp = jsonify(ok=True)
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        resp.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+        resp.headers['Access-Control-Allow-Headers'] = 'Content-Type, X-See-Key'
+        return resp
+    if not _cfg_auth():
+        return jsonify(ok=False, error='unauthorized'), 401
+    days = int(request.args.get('days', 7))
+    now = int(time.time())
+    keys = store.gw_keys(now - days * 86400)
+    return jsonify(ok=True, now=now, keys=keys)
+
+
+@app.route('/api/gw/series', methods=['OPTIONS', 'GET'])
+def api_gw_series():
+    if request.method == 'OPTIONS':
+        resp = jsonify(ok=True)
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        resp.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+        resp.headers['Access-Control-Allow-Headers'] = 'Content-Type, X-See-Key'
+        return resp
+    if not _cfg_auth():
+        return jsonify(ok=False, error='unauthorized'), 401
+    key = (request.args.get('dev') or '').strip()
+    hours = max(1, min(int(request.args.get('hours', 24)), 72))
+    if not key:
+        return jsonify(ok=False, error='未指定设备'), 400
+    now = int(time.time())
+    frm = now - hours * 3600
+    n = hours * 60
+    speed = [0.0] * n
+    cnt = [0] * n
+    pres = [0] * n
+    has = [0] * n
+    name = ''
+    ip = ''
+    for r in store.gw_series(key, frm, now + 1):
+        m = (int(r['ts']) - frm) // 60
+        if m < 0 or m >= n:
+            continue
+        has[m] = 1
+        if r['present']:
+            pres[m] = 1
+            speed[m] += float(r['up'] or 0) + float(r['down'] or 0)
+            cnt[m] += 1
+    for i in range(n):
+        if cnt[i]:
+            speed[i] = speed[i] / cnt[i]
+    for k in store.gw_keys(frm):
+        if k['key'] == key:
+            name = k.get('name') or ''
+            ip = k.get('ip') or ''
+    return jsonify(ok=True, key=key, name=name, ip=ip, frm=frm, now=now, minutes=n,
+                   speed=speed, present=pres, has=has)
 
 
 def _parse_bytes(txt):
