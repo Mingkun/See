@@ -87,6 +87,27 @@ class MainActivity : Activity() {
         web.settings.javaScriptEnabled = true
         web.settings.domStorageEnabled = true
         web.addJavascriptInterface(Bridge(), "SeeBridge")
+        web.setDownloadListener { url, _, contentDisposition, mimeType, _ ->
+            try {
+                val name = android.webkit.URLUtil.guessFileName(url, contentDisposition, mimeType)
+                val isApk = name.endsWith(".apk", true)
+                val request = android.app.DownloadManager.Request(android.net.Uri.parse(url))
+                request.setMimeType(mimeType)
+                request.setTitle(name)
+                request.addRequestHeader("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
+                request.setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                if (isApk) {
+                    request.setDestinationInExternalFilesDir(this, null, "see-update.apk")
+                } else {
+                    request.setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, name)
+                }
+                val dm = getSystemService(DOWNLOAD_SERVICE) as android.app.DownloadManager
+                val id = dm.enqueue(request)
+                if (isApk) updateDownloadId = id
+            } catch (e: Exception) {
+                try { startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))) } catch (_: Exception) {}
+            }
+        }
         web.webChromeClient = object : android.webkit.WebChromeClient() {
             override fun onShowFileChooser(wv: WebView?, cb: android.webkit.ValueCallback<Array<android.net.Uri>>, params: android.webkit.WebChromeClient.FileChooserParams?): Boolean {
                 filePathCallback?.onReceiveValue(null)
@@ -114,7 +135,7 @@ class MainActivity : Activity() {
                         web.postDelayed({
                             web.loadDataWithBaseURL(null,
                                 "<html><body style='font-family:sans-serif;padding:24px;line-height:1.6'>" +
-                                "<h2>see v2.4</h2><p>本机服务连接失败</p>" +
+                                "<h2>see v2.5</h2><p>本机服务连接失败</p>" +
                                 "<p style='color:#b02a37;font-size:13px'>" + msg + "</p>" +
                                 "<p style='font-size:12px;color:#666'>点返回键或重新打开应用重试</p></body></html>",
                                 "text/html", "utf-8", null)

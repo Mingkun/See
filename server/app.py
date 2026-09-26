@@ -206,7 +206,7 @@ def _zai_key():
 
 @app.after_request
 def _snap_cors(resp):
-    if request.path == '/api/snapshots/ocr':
+    if request.path == '/api/snapshots/ocr' or request.path == '/downloads/see-version.json':
         resp.headers['Access-Control-Allow-Origin'] = '*'
     return resp
 
