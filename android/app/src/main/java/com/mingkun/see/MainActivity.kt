@@ -15,6 +15,7 @@ class MainActivity : Activity() {
     private lateinit var server: SeeServer
     private lateinit var scanner: Scanner
     private lateinit var db: Db
+    private var retries: Int? = 0
 
     private val netCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) = refreshNet()
@@ -38,9 +39,23 @@ class MainActivity : Activity() {
         web = WebView(this)
         web.settings.javaScriptEnabled = true
         web.settings.domStorageEnabled = true
+        web.webViewClient = object : android.webkit.WebViewClient() {
+            override fun onReceivedError(view: WebView?, req: android.webkit.WebResourceRequest?, err: android.webkit.WebResourceError?) {
+                if (req?.url?.toString()?.startsWith("http://127.0.0.1:5050") == true) {
+                    retries = (retries ?: 0) + 1
+                    if (retries!! < 5) web.postDelayed({ web.loadUrl("http://127.0.0.1:5050/") }, 800)
+                }
+            }
+        }
         setContentView(web)
         if (savedInstanceState != null) web.restoreState(savedInstanceState)
-        else web.loadUrl("http://127.0.0.1:5050/")
+        else {
+            Thread {
+                var waited = 0
+                while (!server.wasStarted() && waited < 3000) { Thread.sleep(100); waited += 100 }
+                runOnUiThread { web.loadUrl("http://127.0.0.1:5050/") }
+            }.start()
+        }
     }
 
     private fun refreshNet() {
