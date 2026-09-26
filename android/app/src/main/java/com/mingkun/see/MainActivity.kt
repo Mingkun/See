@@ -58,7 +58,27 @@ class MainActivity : Activity() {
             install.setDataAndType(uri, "application/vnd.android.package-archive")
             install.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
             install.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-            startActivity(install)
+            notifyInstall(install)
+            try { startActivity(install) } catch (_: Exception) {}
+        } catch (e: Exception) { e.printStackTrace() }
+    }
+
+    private fun notifyInstall(install: android.content.Intent) {
+        try {
+            val channelId = "see_update"
+            val nm = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
+            if (android.os.Build.VERSION.SDK_INT >= 26) {
+                nm.createNotificationChannel(android.app.NotificationChannel(channelId, "版本更新", android.app.NotificationManager.IMPORTANCE_HIGH))
+            }
+            val pi = android.app.PendingIntent.getActivity(this, 1, install,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
+            val nb = android.app.Notification.Builder(this, channelId)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done)
+                .setContentTitle("see 更新已下载")
+                .setContentText("点击此处安装新版本")
+                .setContentIntent(pi)
+                .setAutoCancel(true)
+            nm.notify(2001, nb.build())
         } catch (e: Exception) { e.printStackTrace() }
     }
 
@@ -135,7 +155,7 @@ class MainActivity : Activity() {
                         web.postDelayed({
                             web.loadDataWithBaseURL(null,
                                 "<html><body style='font-family:sans-serif;padding:24px;line-height:1.6'>" +
-                                "<h2>see v2.9</h2><p>本机服务连接失败</p>" +
+                                "<h2>see v2.10</h2><p>本机服务连接失败</p>" +
                                 "<p style='color:#b02a37;font-size:13px'>" + msg + "</p>" +
                                 "<p style='font-size:12px;color:#666'>点返回键或重新打开应用重试</p></body></html>",
                                 "text/html", "utf-8", null)
@@ -145,6 +165,9 @@ class MainActivity : Activity() {
             }
         }
         setContentView(web)
+        if (android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 2003)
+        }
         registerReceiver(object : android.content.BroadcastReceiver() {
             override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
                 val id = intent?.getLongExtra(android.app.DownloadManager.EXTRA_DOWNLOAD_ID, -1L) ?: -1L
