@@ -8,7 +8,7 @@ import org.json.JSONObject
 import java.io.ByteArrayInputStream
 import java.net.HttpURLConnection
 
-class SeeServer(private val ctx: Context, private val scanner: Scanner, private val phoneIp: String) : NanoHTTPD(5050) {
+class SeeServer(private val ctx: Context, private val scanner: Scanner, private val phoneIp: String, private val db: Db) : NanoHTTPD(5050) {
 
     override fun serve(session: IHTTPSession): Response {
         return try {
@@ -21,6 +21,8 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
                 "/api/scan" -> scanNow()
                 "/api/gw/probe" -> gwProbe(session)
                 "/api/gw/devices" -> gwDevices(session)
+                "/api/gw/analysis" -> gwAnalysis(session)
+                "/api/gw/keys" -> gwKeys()
                 else -> newFixedLengthResponse(Status.NOT_FOUND, "text/plain", "404")
             }
         } catch (e: Exception) {
@@ -98,6 +100,8 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
 
     @Volatile private var gwLoginTs = 0L
     @Volatile private var gwLoginIp = ""
+    @Volatile private var lastRecTs = 0L
+    @Volatile private var lastPruneTs = 0L
 
     private fun gwDevices(session: IHTTPSession): Response {
         val map = HashMap<String, String>()
@@ -158,8 +162,10 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
                 t.put("wired", j.optInt("wcount", 0)); t.put("wireless", j.optInt("wlcount", 0))
                 t.put("wan_connected", j.optString("wanConnect", ""))
                 t.put("wan_uptime", j.optInt("wanUpTime", 0))
+                val nowSec = System.currentTimeMillis() / 1000
+                recSamples(nowSec, arr)
                 json(JSONObject().put("ok", true).put("devices", arr).put("totals", t)
-                    .put("ts", System.currentTimeMillis() / 1000))
+                    .put("ts", nowSec))
             }
         } catch (e: Exception) {
             newFixedLengthResponse(Status.OK, "application/json",
@@ -196,6 +202,90 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
         return s?.bufferedReader()?.readText() ?: ""
     }
 
+    /** 每次拉取网关后落采样：在场记实时速率，不在场记 present=0（休眠/离线） */
+    private fun recSamples(nowSec: Long, arr: JSONArray) {
+        if (nowSec - lastRecTs < 10) return
+        lastRecTs = nowSec
+        try {
+            val present = HashMap<String, JSONObject>()
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                present[o.optString("key")] = o
+            }
+            for (k in db.gwKeys(nowSec - 90000)) {
+                val d = present[k[0]]
+                if (d != null) {
+                    db.addSample(nowSec, k[0], d.optString("name"), d.optString("ip"), 1,
+                        d.optDouble("up", 0.0), d.optDouble("down", 0.0))
+                } else {
+                    db.addSample(nowSec, k[0], k[1], k[2], 0, 0.0, 0.0)
+                }
+            }
+            if (nowSec - lastPruneTs > 3600) {
+                lastPruneTs = nowSec
+                db.pruneSamples(nowSec - 7 * 86400L)
+            }
+        } catch (e: Exception) {}
+    }
+
+    private fun gwKeys(): Response {
+        val now = System.currentTimeMillis() / 1000
+        val arr = JSONArray()
+        try {
+            for (k in db.gwKeys(now - 7 * 86400L)) {
+                arr.put(JSONObject().put("key", k[0]).put("name", k[1]).put("ip", k[2]))
+            }
+        } catch (e: Exception) {}
+        return json(JSONObject().put("ok", true).put("keys", arr).put("now", now))
+    }
+
+    /** 返回最近 hours 小时的分钟级负载曲线（速率取均值），含在场标记 */
+    private fun gwAnalysis(session: IHTTPSession): Response {
+        val map = HashMap<String, String>()
+        session.parseBody(map)
+        val raw = map["postData"] ?: ""
+        val key: String
+        val hours: Int
+        try {
+            val req = JSONObject(raw)
+            key = req.optString("key", "")
+            hours = Math.max(1, Math.min(req.optInt("hours", 24), 48))
+        } catch (e: Exception) {
+            return newFixedLengthResponse(Status.BAD_REQUEST, "application/json",
+                JSONObject().put("ok", false).put("error", "bad json").toString())
+        }
+        if (key.isEmpty()) {
+            return newFixedLengthResponse(Status.OK, "application/json",
+                JSONObject().put("ok", false).put("error", "未指定设备").toString())
+        }
+        return try {
+            val now = System.currentTimeMillis() / 1000
+            val from = now - hours * 3600L
+            val n = hours * 60
+            val speed = DoubleArray(n); val cnt = IntArray(n)
+            val pres = IntArray(n); val has = IntArray(n)
+            for (r in db.gwSeries(key, from, now + 1)) {
+                val m = ((r[0].toLong() - from) / 60).toInt()
+                if (m < 0 || m >= n) continue
+                has[m] = 1
+                if (r[1] > 0.5) { pres[m] = 1; speed[m] += (r[2] + r[3]); cnt[m] += 1 }
+            }
+            var name = ""; var ip = ""
+            for (k in db.gwKeys(from)) if (k[0] == key) { name = k[1]; ip = k[2] }
+            val sp = JSONArray(); val pr = JSONArray(); val hs = JSONArray()
+            for (i in 0 until n) {
+                sp.put(if (cnt[i] > 0) speed[i] / cnt[i] else 0.0)
+                pr.put(pres[i]); hs.put(has[i])
+            }
+            json(JSONObject().put("ok", true).put("key", key).put("name", name).put("ip", ip)
+                .put("from", from).put("now", now).put("minutes", n)
+                .put("speed", sp).put("present", pr).put("has", hs))
+        } catch (e: Exception) {
+            newFixedLengthResponse(Status.OK, "application/json",
+                JSONObject().put("ok", false).put("error", (e.message ?: "err").take(120)).toString())
+        }
+    }
+
     private fun scanNow(): Response {
         scanner.scanNow()
         return json(JSONObject().put("ok", true))
@@ -217,7 +307,7 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
             online = scanner.devices.values.count { it.online }
         }
         val o = JSONObject()
-        o.put("ok", true); o.put("mode", "observer"); o.put("iface", "wifi"); o.put("ver", "2.15"); o.put("vercode", 26)
+        o.put("ok", true); o.put("mode", "observer"); o.put("iface", "wifi"); o.put("ver", "2.16"); o.put("vercode", 27)
         o.put("subnet", scanner.subnet); o.put("ip", phoneIp)
         o.put("uptime", System.currentTimeMillis() / 1000 - scanner.startTs)
         o.put("online", online); o.put("devices", total)

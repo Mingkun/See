@@ -95,7 +95,7 @@ class MainActivity : Activity() {
         scanner.subnet = detectSubnet()
         scanner.selfIp = localIp()
         scanner.gateway = gwIp()
-        server = SeeServer(this, scanner, localIp())
+        server = SeeServer(this, scanner, localIp(), db)
         server.start()
         scanner.start()
         try {

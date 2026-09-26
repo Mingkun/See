@@ -98,7 +98,43 @@
   </div>
 </div>
 
-<div id="sysPanel" style="position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:110;display:none;align-items:center;justify-content:center">
+<div id="viewAn" style="display:none">
+  <div class="panel">
+    <div class="pt" style="display:flex;justify-content:space-between;align-items:center"><span>📈 流量负载分析</span><span class="sub" style="font-size:11px" id="anSub"></span></div>
+    <div style="padding:10px 14px 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <select id="anDev" onchange="anLoad()" style="flex:1;min-width:170px;font-size:12px;border:1px solid var(--line);border-radius:8px;padding:5px 6px;background:#fff"></select>
+      <select id="anWin" onchange="anLoad()" style="font-size:12px;border:1px solid var(--line);border-radius:8px;padding:5px 6px;background:#fff">
+        <option value="24">近 24 小时</option>
+        <option value="12">近 12 小时</option>
+        <option value="6">近 6 小时</option>
+      </select>
+      <button type="button" onclick="anLoad()" style="border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 12px;color:#2563eb;cursor:pointer">刷新</button>
+    </div>
+    <div style="padding:8px 10px 0"><svg id="anChart" style="width:100%;height:190px;display:block;background:#fbfcfe;border:1px solid #eef1f6;border-radius:10px"></svg></div>
+    <div style="padding:4px 14px 0" class="sub">横轴 0–24 时 · 纵轴为下行+上行速率（对数显示）；<span style="color:#b9c0ca">▬</span> 无数据 · <span style="color:#cfe0ff">▬</span> 休眠/离线 · <span style="color:#2563eb">▬</span> 有流量</div>
+    <div id="anLegend" style="padding:6px 14px 0" class="sub"></div>
+  </div>
+  <div class="panel" id="anSleepPanel" style="display:none">
+    <div class="pt">😴 休眠 / 空闲时段<span class="sub" style="font-weight:400;font-size:11px;margin-left:6px">（连续 ≥10 分钟无流量或离线）</span></div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>时段</th><th>时长</th><th>类型</th><th>期间峰值</th></tr></thead>
+        <tbody id="anSleepBody"><tr><td colspan="4" class="hint">—</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="pt">📊 分时用量（1 小时一格）</div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>小时</th><th>平均速率</th><th>峰值</th><th>状态</th></tr></thead>
+        <tbody id="anHourBody"><tr><td colspan="4" class="hint">—</td></tr></tbody>
+      </table>
+    </div>
+    <div class="hint" id="anHint"></div>
+  </div>
+</div>
+
   <div style="width:min(360px,calc(100vw - 32px));max-height:80vh;overflow:auto;background:#fff;border-radius:14px;padding:16px">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><strong style="font-size:15px">系统设置</strong><button onclick="closeSys()" style="border:none;background:none;font-size:22px;cursor:pointer;color:#69737f;line-height:1">×</button></div>
     <div class="sub" id="sysInfo">–</div>
@@ -127,15 +163,19 @@
   </div>
 <div style="position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--line);display:flex;z-index:50;padding-bottom:env(safe-area-inset-bottom)">
   <button id="tabMon" type="button" onclick="seeTab('mon')" style="flex:1;border:none;background:none;padding:7px 0 9px;font-size:12px;cursor:pointer;color:#2563eb"><span style="font-size:17px;display:block;line-height:1.3">📊</span>监控</button>
+  <button id="tabAn" type="button" onclick="seeTab('an')" style="flex:1;border:none;background:none;padding:7px 0 9px;font-size:12px;cursor:pointer;color:#69737f"><span style="font-size:17px;display:block;line-height:1.3">📈</span>分析</button>
   <button id="tabSpd" type="button" onclick="seeTab('spd')" style="flex:1;border:none;background:none;padding:7px 0 9px;font-size:12px;cursor:pointer;color:#69737f"><span style="font-size:17px;display:block;line-height:1.3">📸</span>测速</button>
 </div>
 <script>
 function seeTab(w){
   document.getElementById('viewMon').style.display = w==='mon' ? '' : 'none';
+  document.getElementById('viewAn').style.display = w==='an' ? '' : 'none';
   document.getElementById('viewSpeed').style.display = w==='spd' ? '' : 'none';
   document.getElementById('tabMon').style.color = w==='mon' ? '#2563eb' : '#69737f';
+  document.getElementById('tabAn').style.color = w==='an' ? '#2563eb' : '#69737f';
   document.getElementById('tabSpd').style.color = w==='spd' ? '#2563eb' : '#69737f';
   if (w==='mon') loadStatus();
+  if (w==='an') anInit();
 }
 </script>
 <div id="detail">
@@ -564,6 +604,117 @@ function gwTick(){
     .catch(function(){
       var e = document.getElementById('gwErr'); if (e) e.textContent = '连接失败（手机需在网关局域网内）';
     });
+}
+var AN = { key: '', last: null };
+function anInit(){
+  if (!GW.on && GW['pa' + 'ss']) { try { gwStart(); } catch(e) {} }
+  var sel = document.getElementById('anDev');
+  if (!sel || !sel.options.length || (sel.options.length === 1 && !sel.value)) anKeys();
+  else anLoad();
+}
+function anKeys(){
+  fetch('api/gw/keys').then(function(r){ return r.json(); }).then(function(j){
+    var sel = document.getElementById('anDev');
+    if (!sel) return;
+    var ks = (j && j.keys) || [];
+    if (!ks.length) { sel.innerHTML = '<option value="">暂无设备 · 先在 ⚙ 开启实时设备采集</option>'; document.getElementById('anSub').textContent = ''; return; }
+    ks.sort(function(a, b){ return String(a.name || a.ip).localeCompare(String(b.name || b.ip)); });
+    sel.innerHTML = ks.map(function(k){
+      var lbl = (k.name || k.ip || k.key) + (k.name && k.ip ? ' · ' + k.ip : '');
+      return '<option value="' + esc(k.key) + '">' + esc(lbl) + '</option>';
+    }).join('');
+    if (AN.key) { try { sel.value = AN.key; } catch(e) {} }
+    anLoad();
+  }).catch(function(){ document.getElementById('anSub').textContent = '设备列表读取失败'; });
+}
+function anLoad(){
+  var sel = document.getElementById('anDev');
+  var win = document.getElementById('anWin');
+  var hrs = parseInt((win && win.value) || '24', 10);
+  if (!sel || !sel.value) { document.getElementById('anSub').textContent = '请选择设备'; return; }
+  AN.key = sel.value;
+  document.getElementById('anSub').textContent = '加载中…';
+  fetch('api/gw/analysis', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: AN.key, hours: hrs }) })
+    .then(function(r){ return r.json(); })
+    .then(function(j){ if (!j || !j.ok) { document.getElementById('anSub').textContent = '❌ ' + ((j && j.error) || '失败'); return; } anRender(j); })
+    .catch(function(){ document.getElementById('anSub').textContent = '连接失败'; });
+}
+var AN_THR = 4096;
+function anHMin(sec){ var d = new Date(sec * 1000); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
+function anFmtDur(min){ if (min < 60) return Math.round(min) + '分'; return Math.floor(min / 60) + '时' + (Math.round(min % 60) ? Math.round(min % 60) + '分' : ''); }
+function anRender(j){
+  AN.last = j;
+  var sp = j.speed || [], pr = j.present || [], hs = j.has || [];
+  var n = sp.length || j.minutes || 1440;
+  var from = j.from || 0;
+  var svg = document.getElementById('anChart');
+  var W = svg.clientWidth || 340, H = svg.clientHeight || 190;
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+  var padL = 34, padR = 6, padT = 10, padB = 18;
+  var iw = W - padL - padR, ih = H - padT - padB;
+  var G = 5, groups = Math.ceil(n / G);
+  var maxV = 1; for (var i = 0; i < n; i++) if (sp[i] > maxV) maxV = sp[i];
+  var lg = Math.log10(1 + maxV);
+  function yv(v){ var t = Math.log10(1 + v) / lg; if (t < 0) t = 0; if (t > 1) t = 1; return padT + ih - t * ih; }
+  var p = [];
+  for (var hh = 0; hh <= 24; hh += 4){
+    var x = padL + (hh / 24) * iw;
+    p.push('<line x1="' + x.toFixed(1) + '" y1="' + padT + '" x2="' + x.toFixed(1) + '" y2="' + (padT + ih) + '" stroke="#f1f4f9"/>');
+    if (hh < 24){ var lbl = anHMin(from + hh * 3600); p.push('<text x="' + x.toFixed(1) + '" y="' + (H - 5) + '" font-size="8" fill="#9aa4b2" text-anchor="middle">' + lbl + '</text>'); }
+  }
+  p.push('<line x1="' + padL + '" y1="' + (padT + ih) + '" x2="' + (padL + iw) + '" y2="' + (padT + ih) + '" stroke="#dfe5ee"/>');
+  p.push('<text x="4" y="' + (padT + 8) + '" font-size="8" fill="#9aa4b2">' + fmtSpeed(maxV) + '</text>');
+  var bw = iw / groups;
+  for (var g = 0; g < groups; g++){
+    var s = 0, c = 0, any = 0, pres = 0;
+    for (var k = g * G; k < Math.min((g + 1) * G, n); k++){ if (hs[k]) any = 1; if (pr[k]) pres = 1; s += sp[k]; c++; }
+    var x0 = padL + g * bw, av = c ? s / c : 0;
+    if (!any) p.push('<rect x="' + x0.toFixed(2) + '" y="' + padT + '" width="' + Math.max(bw, 0.6).toFixed(2) + '" height="' + ih + '" fill="#e9edf3"/>');
+    else if (!pres) p.push('<rect x="' + x0.toFixed(2) + '" y="' + padT + '" width="' + Math.max(bw, 0.6).toFixed(2) + '" height="' + ih + '" fill="#d7e4ff"/>');
+    else if (av > 0){
+      var ytop = yv(av);
+      p.push('<rect x="' + x0.toFixed(2) + '" y="' + ytop.toFixed(1) + '" width="' + Math.max(bw - 0.4, 0.6).toFixed(2) + '" height="' + Math.max(padT + ih - ytop, 0.8).toFixed(1) + '" fill="#2563eb" rx="0.6"/>');
+    }
+  }
+  svg.innerHTML = p.join('');
+  var runs = [];
+  var i2 = 0;
+  while (i2 < n){
+    var idle = hs[i2] ? (pr[i2] ? (sp[i2] < AN_THR) : true) : false;
+    if (!idle) { i2++; continue; }
+    var j2 = i2, peak = 0, offline = 0;
+    while (j2 < n){
+      var idle2 = hs[j2] ? (pr[j2] ? (sp[j2] < AN_THR) : true) : false;
+      if (!idle2) break;
+      if (sp[j2] > peak) peak = sp[j2];
+      if (!pr[j2]) offline++;
+      j2++;
+    }
+    if (j2 - i2 >= 10) runs.push({ a: i2, b: j2, len: j2 - i2, peak: peak, type: offline > (j2 - i2) / 2 ? '休眠/离线' : '空闲' });
+    i2 = j2;
+  }
+  var sb = document.getElementById('anSleepBody');
+  if (!runs.length) { sb.innerHTML = '<tr><td colspan="4" class="hint">没找到 ≥10 分钟的休眠/空闲时段</td></tr>'; }
+  else {
+    sb.innerHTML = runs.map(function(r){
+      var tip = r.type === '休眠/离线' ? '设备已从网关列表消失（断电/休眠/离开）' : '在线但几乎无流量';
+      return '<tr><td class="num">' + anHMin(from + r.a * 60) + '–' + anHMin(from + r.b * 60) + '</td><td class="num">' + anFmtDur(r.len) + '</td><td class="sub">' + r.type + '<div class="sub" style="font-size:10px">' + tip + '</div></td><td class="num">' + fmtSpeed(r.peak) + '</td></tr>';
+    }).join('');
+  }
+  document.getElementById('anSleepPanel').style.display = '';
+  var hb = document.getElementById('anHourBody'), rows = [];
+  var nh = Math.floor(n / 60);
+  for (var h3 = 0; h3 < nh; h3++){
+    var tot = 0, mx = 0, ct2 = 0, any2 = 0, pr2 = 0;
+    for (var k2 = h3 * 60; k2 < (h3 + 1) * 60; k2++){ if (hs[k2]) any2 = 1; if (pr[k2]) pr2 = 1; tot += sp[k2]; if (sp[k2] > mx) mx = sp[k2]; ct2++; }
+    var st = !any2 ? '<span class="sub">无数据</span>' : (!pr2 ? '<span style="color:#2563eb">休眠/离线</span>' : (tot / ct2 < AN_THR ? '<span style="color:#d97706">空闲</span>' : '<span style="color:#16a34a">有流量</span>'));
+    rows.push('<tr><td class="num">' + anHMin(from + h3 * 3600) + '–' + anHMin(from + (h3 + 1) * 3600) + '</td><td class="num">' + fmtSpeed(tot / ct2) + '</td><td class="num">' + fmtSpeed(mx) + '</td><td>' + st + '</td></tr>');
+  }
+  hb.innerHTML = rows.join('');
+  var cover = 0; for (var q = 0; q < n; q++) if (hs[q]) cover++;
+  document.getElementById('anSub').textContent = (j.name || j.ip || AN.key) + ' · ' + anFmtDur(n) + '窗口';
+  document.getElementById('anLegend').innerHTML = '采样覆盖 ' + (cover / n * 100).toFixed(0) + '%（' + anFmtDur(cover) + '） · 休眠/空闲 ' + runs.length + ' 段 · 空闲阈值 ' + fmtSpeed(AN_THR);
+  document.getElementById('anHint').textContent = '数据来自 app 运行期间对网关的采样（每 10 秒 1 次），app 关闭期间不采集；曲线为 5 分钟一格的速率均值。';
 }
 gwLoad();
 </script>
