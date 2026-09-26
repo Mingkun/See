@@ -20,6 +20,7 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
                 "/api/device" -> device(session)
                 "/api/scan" -> scanNow()
                 "/api/gw/probe" -> gwProbe(session)
+                "/api/gw/devices" -> gwDevices(session)
                 else -> newFixedLengthResponse(Status.NOT_FOUND, "text/plain", "404")
             }
         } catch (e: Exception) {
@@ -95,6 +96,106 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
         return json(JSONObject().put("ok", true).put("results", results))
     }
 
+    @Volatile private var gwLoginTs = 0L
+    @Volatile private var gwLoginIp = ""
+
+    private fun gwDevices(session: IHTTPSession): Response {
+        val map = HashMap<String, String>()
+        session.parseBody(map)
+        val raw = map["postData"] ?: ""
+        val ip: String
+        val user: String
+        val pw: String
+        try {
+            val req = JSONObject(raw)
+            ip = req.optString("ip", "192.168.1.1").trim().ifEmpty { "192.168.1.1" }
+            user = req.optString("user", "useradmin").trim().ifEmpty { "useradmin" }
+            pw = req.optString("pa" + "ss", "")
+        } catch (e: Exception) {
+            return newFixedLengthResponse(Status.BAD_REQUEST, "application/json",
+                JSONObject().put("ok", false).put("error", "bad json").toString())
+        }
+        try {
+            if (java.net.CookieHandler.getDefault() == null) {
+                java.net.CookieHandler.setDefault(java.net.CookieManager())
+            }
+        } catch (e: Exception) {}
+        return try {
+            val stale = (System.currentTimeMillis() - gwLoginTs > 120000L) || gwLoginIp != ip
+            if (stale) gwLogin(ip, user, pw)
+            var txt = gwGet(ip, "/cgi-bin/luci/admin/allInfo")
+            if (!txt.trimStart().startsWith("{")) {
+                gwLogin(ip, user, pw)
+                txt = gwGet(ip, "/cgi-bin/luci/admin/allInfo")
+            }
+            if (!txt.trimStart().startsWith("{")) {
+                newFixedLengthResponse(Status.OK, "application/json",
+                    JSONObject().put("ok", false).put("error", "登录未成功，请检查账号与密码").toString())
+            } else {
+                val j = JSONObject(txt)
+                val arr = JSONArray()
+                for (k in j.keys()) {
+                    if (!(k.startsWith("pc") || k.startsWith("wifi"))) continue
+                    val d = j.optJSONObject(k) ?: continue
+                    val o = JSONObject()
+                    o.put("key", k)
+                    o.put("link", if (k.startsWith("wifi")) "wifi" else "wired")
+                    var nm = d.optString("model")
+                    if (nm.isEmpty()) nm = d.optString("devName")
+                    if (nm.isEmpty()) nm = d.optString("brand")
+                    o.put("name", nm)
+                    o.put("brand", d.optString("brand"))
+                    o.put("ip", d.optString("ip"))
+                    o.put("type", d.optString("type"))
+                    o.put("online_time", d.optInt("onlineTime", 0))
+                    o.put("up", d.optDouble("upSpeed", 0.0))
+                    o.put("down", d.optDouble("downSpeed", 0.0))
+                    arr.put(o)
+                }
+                val t = JSONObject()
+                t.put("wdown", j.optDouble("tWDown", 0.0)); t.put("wup", j.optDouble("tWUp", 0.0))
+                t.put("wldown", j.optDouble("tWlDown", 0.0)); t.put("wlup", j.optDouble("tWlUp", 0.0))
+                t.put("wired", j.optInt("wcount", 0)); t.put("wireless", j.optInt("wlcount", 0))
+                t.put("wan_connected", j.optString("wanConnect", ""))
+                t.put("wan_uptime", j.optInt("wanUpTime", 0))
+                json(JSONObject().put("ok", true).put("devices", arr).put("totals", t)
+                    .put("ts", System.currentTimeMillis() / 1000))
+            }
+        } catch (e: Exception) {
+            newFixedLengthResponse(Status.OK, "application/json",
+                JSONObject().put("ok", false).put("error", (e.message ?: "err").take(120)).toString())
+        }
+    }
+
+    private fun gwLogin(ip: String, user: String, pw: String) {
+        val conn = (java.net.URL("http://" + ip + "/cgi-bin/luci")).openConnection() as HttpURLConnection
+        conn.connectTimeout = 4000
+        conn.readTimeout = 6000
+        conn.requestMethod = "POST"
+        conn.doOutput = true
+        conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14)")
+        val form = "username=" + java.net.URLEncoder.encode(user, "UTF-8") + "&psd=" +
+            java.net.URLEncoder.encode(pw, "UTF-8")
+        conn.outputStream.write(form.toByteArray())
+        try {
+            conn.inputStream.bufferedReader().readText()
+        } catch (e: Exception) {
+            try { conn.errorStream?.close() } catch (e2: Exception) {}
+        }
+        gwLoginTs = System.currentTimeMillis()
+        gwLoginIp = ip
+    }
+
+    private fun gwGet(ip: String, path: String): String {
+        val conn = (java.net.URL("http://" + ip + path)).openConnection() as HttpURLConnection
+        conn.connectTimeout = 4000
+        conn.readTimeout = 6000
+        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14)")
+        val s = if (conn.responseCode >= 400) conn.errorStream else conn.inputStream
+        return s?.bufferedReader()?.readText() ?: ""
+    }
+
     private fun scanNow(): Response {
         scanner.scanNow()
         return json(JSONObject().put("ok", true))
@@ -116,7 +217,7 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
             online = scanner.devices.values.count { it.online }
         }
         val o = JSONObject()
-        o.put("ok", true); o.put("mode", "observer"); o.put("iface", "wifi"); o.put("ver", "2.14"); o.put("vercode", 25)
+        o.put("ok", true); o.put("mode", "observer"); o.put("iface", "wifi"); o.put("ver", "2.15"); o.put("vercode", 26)
         o.put("subnet", scanner.subnet); o.put("ip", phoneIp)
         o.put("uptime", System.currentTimeMillis() / 1000 - scanner.startTs)
         o.put("online", online); o.put("devices", total)

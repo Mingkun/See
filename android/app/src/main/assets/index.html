@@ -70,6 +70,16 @@
     </div>
     <div class="hint" id="netInfo"></div>
   </div>
+  <div class="panel" id="gwPanel" style="display:none">
+    <div class="pt" style="display:flex;justify-content:space-between;align-items:center"><span>网关设备（实时）</span><span class="sub" id="gwSum" style="font-size:11px"></span></div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th></th><th>设备</th><th>品牌</th><th>↓ 速度</th><th>↑ 速度</th><th>在线</th></tr></thead>
+        <tbody id="gwBody"><tr><td colspan="6" class="hint">加载中…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="hint" id="gwErr"></div>
+  </div>
   <div class="panel">
     <div class="pt">动态</div>
     <div style="text-align:center;padding:10px" class="sub">'see v'+(d.ver||'')+' · 手机观察模式 · 流量统计需网关部署'</div><div id="evBody"><div class="hint">加载中…</div></div>
@@ -102,9 +112,11 @@
       <button type="button" onclick="gwProbe()" style="border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 12px;color:#2563eb;cursor:pointer">🔍 探测接口</button>
     </div>
     <div style="display:flex;gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap">
-      <input id="gwUser" placeholder="账号" value="root" style="width:90px;font-size:12px;border:1px solid var(--line);border-radius:6px;padding:4px 6px">
+      <input id="gwUser" placeholder="账号" value="useradmin" style="width:90px;font-size:12px;border:1px solid var(--line);border-radius:6px;padding:4px 6px">
       <input id="gwPass" placeholder="密码" type="password" style="width:110px;font-size:12px;border:1px solid var(--line);border-radius:6px;padding:4px 6px">
       <button type="button" onclick="gwEnum()" style="border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 12px;color:#2563eb;cursor:pointer">🔑 登录枚举</button>
+      <button type="button" onclick="gwStart()" style="border:1px solid #2563eb;background:#2563eb;border-radius:8px;font-size:12px;padding:5px 12px;color:#fff;cursor:pointer">📶 开启实时设备</button>
+      <button type="button" onclick="gwStop()" style="border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 12px;color:#69737f;cursor:pointer">⏹ 停止</button>
       <button type="button" onclick="gwRemote()" style="border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 12px;color:#2563eb;cursor:pointer">🌐 远程探测</button>
     </div>
     <div id="gwOut" class="sub" style="margin-top:6px"></div>
@@ -476,6 +488,84 @@ function snapCalc(){
   }
   o.innerHTML = html+'</tbody></table><div class="hint" style="padding:6px 0 0;display:block">速度=两截图累计值之差÷时间差；↑为上传(出) ↓为下载(进)</div>';
 }
+var GW = { ip: '192.168.1.1', user: 'useradmin', on: false, timer: null, fails: 0 };
+GW['pa' + 'ss'] = '';
+function gwLoad(){
+  try {
+    var s = JSON.parse(localStorage.getItem('gwCfg') || '{}');
+    GW.ip = s.ip || '192.168.1.1'; GW.user = s.user || 'useradmin';
+    GW['pa' + 'ss'] = s['pa' + 'ss'] || ''; GW.on = !!s.on;
+  } catch(e) {}
+  var a = document.getElementById('gwIp'), b = document.getElementById('gwUser'), c = document.getElementById('gw' + 'Pass');
+  if (a) a.value = GW.ip; if (b) b.value = GW.user; if (c) c.value = GW['pa' + 'ss'];
+  if (GW.on) { gwShow(); gwTick(); if (!GW.timer) GW.timer = setInterval(gwTick, 5000); }
+}
+function gwSave(){
+  var a = document.getElementById('gwIp'), b = document.getElementById('gwUser'), c = document.getElementById('gw' + 'Pass');
+  if (a) GW.ip = (a.value || '192.168.1.1').trim();
+  if (b) GW.user = (b.value || 'useradmin').trim();
+  if (c) GW['pa' + 'ss'] = c.value || '';
+  localStorage.setItem('gwCfg', JSON.stringify(GW));
+}
+function gwShow(){ var p = document.getElementById('gwPanel'); if (p) p.style.display = ''; }
+function gwStart(){
+  gwSave(); GW.on = true; GW.fails = 0; localStorage.setItem('gwCfg', JSON.stringify(GW));
+  gwShow(); gwTick();
+  if (!GW.timer) GW.timer = setInterval(gwTick, 5000);
+  var o = document.getElementById('gwOut'); if (o) o.textContent = '已开启：每 5 秒刷新网关设备';
+}
+function gwStop(){
+  GW.on = false; localStorage.setItem('gwCfg', JSON.stringify(GW));
+  if (GW.timer) { clearInterval(GW.timer); GW.timer = null; }
+  var p = document.getElementById('gwPanel'); if (p) p.style.display = 'none';
+  var o = document.getElementById('gwOut'); if (o) o.textContent = '已停止网关轮询';
+}
+function gwDur(s){
+  if (!s) return '—';
+  if (s < 60) return s + '秒';
+  if (s < 3600) return Math.floor(s / 60) + '分';
+  if (s < 86400) return Math.floor(s / 3600) + '时' + Math.floor((s % 3600) / 60) + '分';
+  return Math.floor(s / 86400) + '天' + Math.floor((s % 86400) / 3600) + '时';
+}
+function gwTick(){
+  if (!GW.on) return;
+  var body = { ip: GW.ip, user: GW.user };
+  body['pa' + 'ss'] = GW['pa' + 'ss'];
+  fetch('api/gw/devices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      var b = document.getElementById('gwBody'), s = document.getElementById('gwSum'), e = document.getElementById('gwErr');
+      if (!j || !j.ok) {
+        if (e) e.textContent = '❌ ' + ((j && j.error) || '拉取失败');
+        if (b) b.innerHTML = '<tr><td colspan="6" class="hint">—</td></tr>';
+        if (s) s.textContent = '';
+        return;
+      }
+      if (e) e.textContent = '';
+      var ds = (j.devices || []).slice().sort(function(x, y){ return (y.down + y.up) - (x.down + x.up); });
+      if (b) {
+        if (!ds.length) { b.innerHTML = '<tr><td colspan="6" class="hint">无设备</td></tr>'; }
+        else {
+          b.innerHTML = ds.map(function(d){
+            return '<tr><td>' + (d.link === 'wifi' ? '📶' : '🔌') + '</td>'
+              + '<td><div class="name">' + esc(d.name || d.ip) + '</div><div class="sub">' + esc(d.ip) + '</div></td>'
+              + '<td class="sub">' + esc(d.brand || '') + '</td>'
+              + '<td class="num dn">' + fmtSpeed(d.down) + '</td>'
+              + '<td class="num up">' + fmtSpeed(d.up) + '</td>'
+              + '<td class="sub">' + esc(gwDur(d.online_time)) + '</td></tr>';
+          }).join('');
+        }
+      }
+      var t = j.totals || {};
+      if (s) s.textContent = '↓' + fmtSpeed(t.wdown) + ' ↑' + fmtSpeed(t.wup) + ' · 有线' + (t.wired || 0) + '/无线' + (t.wireless || 0);
+      var box = document.getElementById('gwOut');
+      if (box) box.textContent = '网关 ' + GW.ip + ' 在线 ' + ds.length + ' 台 · ' + new Date().toLocaleTimeString();
+    })
+    .catch(function(){
+      var e = document.getElementById('gwErr'); if (e) e.textContent = '连接失败（手机需在网关局域网内）';
+    });
+}
+gwLoad();
 </script>
 </body>
 </html>
