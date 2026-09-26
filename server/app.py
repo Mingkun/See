@@ -241,6 +241,15 @@ def _parse_bytes(txt):
     return int(v * mul)
 
 
+@app.route('/api/gw/report', methods=['OPTIONS'])
+def api_gw_report_options():
+    resp = jsonify(ok=True)
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    resp.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+    resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+    return resp
+
+
 @app.post('/api/gw/report')
 def api_gw_report():
     data = request.get_json(force=True, silent=True) or {}
