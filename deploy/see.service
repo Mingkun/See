@@ -1,0 +1,16 @@
+[Unit]
+Description=see LAN Monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/see
+ExecStart=/usr/bin/python3 /opt/see/run.py
+Restart=always
+RestartSec=5
+# 需要 root 以便 ARP 扫描与流量嗅探
+User=root
+
+[Install]
+WantedBy=multi-user.target

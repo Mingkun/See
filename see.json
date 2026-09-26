@@ -1,0 +1,7 @@
+{
+  "port": 5050,
+  "iface": "",
+  "scan_interval": 10,
+  "offline_after": 30,
+  "gateway": "auto"
+}
