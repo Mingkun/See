@@ -208,7 +208,8 @@ def _zai_key():
 @app.after_request
 def _snap_cors(resp):
     if request.path in ('/api/snapshots/ocr', '/downloads/see-version.json', '/api/gw/report',
-                        '/api/gw/plan', '/api/config'):
+                        '/api/gw/plan', '/api/config',
+                        '/api/gw/keys', '/api/gw/series', '/api/gw/samples'):
         resp.headers['Access-Control-Allow-Origin'] = '*'
         resp.headers['Access-Control-Allow-Headers'] = 'Content-Type, X-See-Key'
     return resp

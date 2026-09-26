@@ -249,11 +249,13 @@ class GwService : Service() {
                 val o = arr.getJSONObject(i)
                 val k = o.optString("key")
                 if (k.isEmpty()) continue
-                seen.add(k)
                 val nm = o.optString("name")
                 val ip = o.optString("ip")
-                known[k] = arrayOf(nm, ip)
-                buf.add(arrayOf(nowSec, k, nm, ip, 1,
+                // 网关的 pc1/wifi1 是位置槽位，会随设备上下线漂移；用 IP 当稳定主键
+                val dk = if (ip.isNotEmpty() && ip != "--") ip else k
+                seen.add(dk)
+                known[dk] = arrayOf(nm, ip)
+                buf.add(arrayOf(nowSec, dk, nm, ip, 1,
                     o.optDouble("up", 0.0), o.optDouble("down", 0.0)))
             }
             val cut = nowSec - 90000

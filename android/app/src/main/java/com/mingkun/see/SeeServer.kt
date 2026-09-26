@@ -215,8 +215,11 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
             val seen = HashSet<String>()
             for ((pk, d) in present) {
                 if (pk.isEmpty()) continue
-                seen.add(pk)
-                db.addSample(nowSec, pk, d.optString("name"), d.optString("ip"), 1,
+                val ip = d.optString("ip")
+                // pc1/wifi1 只是位置槽位，会随设备上下线漂移；改以 IP 作稳定主键
+                val dk = if (ip.isNotEmpty() && ip != "--") ip else pk
+                seen.add(dk)
+                db.addSample(nowSec, dk, d.optString("name"), ip, 1,
                     d.optDouble("up", 0.0), d.optDouble("down", 0.0))
             }
             // 近 25 小时内出现过、但当前不在网关列表里的设备 → 休眠/离线（present=0）
@@ -311,7 +314,7 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
             online = scanner.devices.values.count { it.online }
         }
         val o = JSONObject()
-        o.put("ok", true); o.put("mode", "observer"); o.put("iface", "wifi"); o.put("ver", "2.21"); o.put("vercode", 32)
+        o.put("ok", true); o.put("mode", "observer"); o.put("iface", "wifi"); o.put("ver", "2.22"); o.put("vercode", 33)
         o.put("subnet", scanner.subnet); o.put("ip", phoneIp)
         o.put("uptime", System.currentTimeMillis() / 1000 - scanner.startTs)
         o.put("online", online); o.put("devices", total)
