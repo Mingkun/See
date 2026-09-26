@@ -1,5 +1,6 @@
 # coding: utf-8
 """see — LAN/WiFi client monitor: Flask API + scanner + gateway traffic monitor."""
+import base64
 import ipaddress
 import json
 import os
@@ -7,6 +8,7 @@ import socket
 import subprocess
 import threading
 import time
+import urllib.request
 
 from flask import Flask, jsonify, request, send_from_directory
 
@@ -188,3 +190,77 @@ def api_device():
                    apps=monitor.apps(ip) if GATEWAY else [],
                    today=_live_today(ip) if GATEWAY else {'up': 0, 'down': 0},
                    session=monitor.totals(ip) if GATEWAY else {'up': 0, 'down': 0})
+
+
+# ---------- 截图测速：GLM 视觉 OCR ----------
+_OCR_LIMITS = {}
+
+
+def _zai_key():
+    try:
+        data = json.loads(open('/root/.openclaw/secrets.json', encoding='utf-8').read())
+        return data.get('models', {}).get('providers', {}).get('zai', {}).get('apiKey')
+    except Exception:
+        return None
+
+
+@app.post('/api/snapshots/ocr')
+def api_snap_ocr():
+    ip = request.remote_addr or '?'
+    now = time.time()
+    cnt, win = _OCR_LIMITS.get(ip, (0, now))
+    if now - win > 3600:
+        cnt, win = 0, now
+    cnt += 1
+    _OCR_LIMITS[ip] = (cnt, win)
+    if cnt > 12:
+        return jsonify(ok=False, error='请求太频繁，请一小时后再试'), 429
+    key = _zai_key()
+    if not key:
+        return jsonify(ok=False, error='视觉模型密钥未配置'), 500
+    f = request.files.get('image')
+    if f is None:
+        return jsonify(ok=False, error='缺少图片'), 400
+    data = f.read()
+    if len(data) < 100 or len(data) > 8 * 1024 * 1024:
+        return jsonify(ok=False, error='图片无效或超过8MB'), 400
+    mime = f.mimetype if (f.mimetype or '').startswith('image/') else 'image/jpeg'
+    b64 = base64.b64encode(data).decode('ascii')
+    prompt = ('提取这张截图中网络流量相关的累计数据。返回纯JSON不要markdown：'
+              '{"up_bytes": 上行/发送/上传累计字节数(整数,按1KB=1024进位换算,图中没有则null), '
+              '"down_bytes": 下行/接收/下载累计字节数(整数,没有则null), '
+              '"time_text": "截图中可见的时间或日期文字,没有则null"}')
+    payload = json.dumps({
+        'model': 'glm-4.6v',
+        'messages': [{'role': 'user', 'content': [
+            {'type': 'image_url', 'image_url': {'url': 'data:%s;base64,%s' % (mime, b64)}},
+            {'type': 'text', 'text': prompt},
+        ]}],
+        'temperature': 0.1, 'max_tokens': 2000,
+    }).encode()
+    req = urllib.request.Request(
+        'https://api.z.ai/api/coding/paas/v4/chat/completions', data=payload, method='POST',
+        headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key})
+    try:
+        with urllib.request.urlopen(req, timeout=90) as resp:
+            out = json.loads(resp.read().decode('utf-8'))
+        text = (out['choices'][0]['message']['content'] or '').strip()
+    except Exception as e:
+        return jsonify(ok=False, error='识别失败: %s' % e), 502
+    t = text.strip('`').strip()
+    if t[:4].lower() == 'json':
+        t = t[4:].strip()
+    try:
+        parsed = json.loads(t)
+    except Exception:
+        parsed = {'up_bytes': None, 'down_bytes': None, 'time_text': text[:120]}
+    up, down = parsed.get('up_bytes'), parsed.get('down_bytes')
+    try:
+        up = int(up) if up is not None else None
+    except Exception:
+        up = None
+    try:
+        down = int(down) if down is not None else None
+    except Exception:
+        down = None
+    return jsonify(ok=True, up=up, down=down, time_text=parsed.get('time_text'), raw=text[:300])

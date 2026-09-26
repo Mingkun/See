@@ -74,6 +74,16 @@
     <div class="pt">动态</div>
     <div id="evBody"><div class="hint">加载中…</div></div>
   </div>
+  <div class="panel" id="snapPanel">
+    <div class="pt">📸 截图测速</div>
+    <div style="padding:10px 14px">
+      <div class="hint" style="padding:0 0 8px;display:block">选两张或以上截图（手机流量页/路由器统计页，含累计上传/下载量），自动识别并按时间差算出进/出网速。</div>
+      <input type="file" id="snapFiles" accept="image/*" multiple style="font-size:12px">
+      <div id="snapRows"></div>
+      <button type="button" id="snapCalcBtn" onclick="snapCalc()" style="margin-top:8px;border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 14px;color:#2563eb;cursor:pointer">计算网速</button>
+      <div id="snapOut"></div>
+    </div>
+  </div>
 </div>
 
 <div id="detail">
@@ -181,6 +191,64 @@ document.getElementById('detail').addEventListener('click',function(e){ if(e.tar
 loadStatus(); loadDevices(); loadEvents();
 setInterval(loadStatus,2000); setInterval(loadDevices,2000); setInterval(loadEvents,5000);
 setInterval(function(){ if(curIp) loadDetail(); },3000);
+var snapItems = [];
+function pad2(n){ return (n<10?'0':'')+n; }
+function fmtDT(ms){ var d=new Date(ms); return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())+'T'+pad2(d.getHours())+':'+pad2(d.getMinutes())+':'+pad2(d.getSeconds()); }
+document.getElementById('snapFiles').addEventListener('change', function(){
+  var fs = Array.prototype.slice.call(this.files || []);
+  if (!fs.length) return;
+  fs.forEach(function(f){
+    var it = { ts: f.lastModified || Date.now(), up: null, down: null, busy: true, err: '', url: URL.createObjectURL(f) };
+    snapItems.push(it); renderSnap();
+    var fd = new FormData(); fd.append('image', f);
+    fetch('api/snapshots/ocr', { method: 'POST', body: fd })
+      .then(function(r){ return r.json(); })
+      .then(function(d){ it.busy=false; if(d&&d.ok){ it.up=d.up; it.down=d.down; } else { it.err=(d&&d.error)||'识别失败'; } renderSnap(); })
+      .catch(function(){ it.busy=false; it.err='网络错误'; renderSnap(); });
+  });
+  this.value='';
+});
+function mb(v){ return (v==null||isNaN(v))?'':(v/1048576).toFixed(2); }
+function renderSnap(){
+  snapItems.sort(function(a,b){ return a.ts-b.ts; });
+  var html='';
+  snapItems.forEach(function(it,i){
+    html+='<div style="display:flex;gap:5px;align-items:center;padding:7px 0;border-bottom:1px solid #f0f3f7;flex-wrap:wrap">'
+      +'<img src="'+it.url+'" style="width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid #e3e8ef">'
+      +'<input type="datetime-local" step="1" value="'+fmtDT(it.ts)+'" onchange="snapItems['+i+'].ts=new Date(this.value).getTime()" style="flex:1;min-width:150px;font-size:11px;border:1px solid var(--line);border-radius:6px;padding:3px 5px">'
+      +'<span class="sub">↑</span><input type="number" step="0.01" min="0" placeholder="MB" value="'+mb(it.up)+'" onchange="snapItems['+i+'].up=isNaN(this.value*1)?null:this.value*1*1048576" style="width:76px;font-size:11px;border:1px solid var(--line);border-radius:6px;padding:3px 5px">'
+      +'<span class="sub">↓</span><input type="number" step="0.01" min="0" placeholder="MB" value="'+mb(it.down)+'" onchange="snapItems['+i+'].down=isNaN(this.value*1)?null:this.value*1*1048576" style="width:76px;font-size:11px;border:1px solid var(--line);border-radius:6px;padding:3px 5px">'
+      +(it.busy?'<span class="sub" style="color:#d97706">识别中…</span>':(it.err?'<span class="sub" style="color:#b02a37">'+esc(it.err)+'</span>':''))
+      +'</div>';
+  });
+  document.getElementById('snapRows').innerHTML = html;
+}
+function snapCalc(){
+  var o = document.getElementById('snapOut');
+  var its = snapItems.filter(function(x){ return x.ts && x.up!=null && !isNaN(x.up) && x.down!=null && !isNaN(x.down); });
+  its.sort(function(a,b){ return a.ts-b.ts; });
+  if (its.length < 2){ o.innerHTML = '<div class="hint" style="padding:8px 0 0;display:block">需要至少两张已识别出 ↑↓ 数值的截图</div>'; return; }
+  var html = '<table style="margin-top:10px"><thead><tr><th>区间</th><th>时长</th><th>↑ 上传速度</th><th>↓ 下载速度</th></tr></thead><tbody>';
+  var rows = 0;
+  for (var i=1;i<its.length;i++){
+    var a=its[i-1], b=its[i], dt=(b.ts-a.ts)/1000;
+    if (dt <= 0) continue;
+    var du=b.up-a.up, dd=b.down-a.down;
+    var note='';
+    if (du<0||dd<0) note=' <span class="sub" style="color:#b02a37">(计数器清零?)</span>';
+    html+='<tr><td class="sub">'+pad2(new Date(a.ts).getHours())+':'+pad2(new Date(a.ts).getMinutes())+' → '+pad2(new Date(b.ts).getHours())+':'+pad2(new Date(b.ts).getMinutes())+'</td>'
+      +'<td class="num">'+(dt>=60?(dt/60).toFixed(1)+'分':Math.round(dt)+'秒')+'</td>'
+      +'<td class="num up">'+(du<0?'-':fmtSpeed(du/dt))+'</td>'
+      +'<td class="num dn">'+(dd<0?'-':fmtSpeed(dd/dt))+'</td>'+note+'</tr>';
+    rows++;
+  }
+  var a0=its[0], b0=its[its.length-1], dtt=(b0.ts-a0.ts)/1000;
+  if (dtt>0){
+    html+='<tr style="border-top:2px solid var(--line)"><td><b>整体平均</b></td><td class="num">'+(dtt>=60?(dtt/60).toFixed(1)+'分':Math.round(dtt)+'秒')+'</td>'
+      +'<td class="num up"><b>'+fmtSpeed((b0.up-a0.up)/dtt)+'</b></td><td class="num dn"><b>'+fmtSpeed((b0.down-a0.down)/dtt)+'</b></td></tr>';
+  }
+  o.innerHTML = html+'</tbody></table><div class="hint" style="padding:6px 0 0;display:block">速度=两截图累计值之差÷时间差；↑为上传(出) ↓为下载(进)</div>';
+}
 </script>
 </body>
 </html>
