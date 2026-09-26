@@ -33,31 +33,50 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
         session.parseBody(map)
         val body = map["postData"] ?: ""
         val ip: String
-        val paths = ArrayList<String>()
+        val paths = ArrayList<Any>()
         try {
             val req = JSONObject(body)
             ip = req.optString("ip", "192.168.1.1")
             val arr = req.optJSONArray("paths") ?: JSONArray()
-            for (i in 0 until arr.length()) paths.add(arr.getString(i))
+            for (i in 0 until arr.length()) paths.add(arr.get(i))
         } catch (e: Exception) {
             return newFixedLengthResponse(Status.BAD_REQUEST, "application/json",
                 JSONObject().put("ok", false).put("error", "bad json").toString())
         }
         val results = JSONArray()
-        for (path in paths) {
+        for (item in paths) {
             val r = JSONObject()
-            r.put("path", path)
+            var path = ""
+            var method = "GET"
+            var bodyStr: String? = null
+            try {
+                if (item is org.json.JSONArray) {
+                    // ["路径","方法","body"]
+                    path = (item as org.json.JSONArray).optString(0, "")
+                    method = (item as org.json.JSONArray).optString(1, "GET")
+                    bodyStr = (item as org.json.JSONArray).optString(2, "")
+                } else {
+                    path = item.toString()
+                }
+            } catch (e: Exception) { path = item.toString() }
+            r.put("path", method + " " + path)
             try {
                 val url = java.net.URL("http://" + ip + path)
                 val conn = url.openConnection() as HttpURLConnection
                 conn.connectTimeout = 4000
                 conn.readTimeout = 4000
                 conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
+                conn.requestMethod = method
+                if (bodyStr != null && bodyStr.isNotEmpty()) {
+                    conn.doOutput = true
+                    conn.setRequestProperty("Content-Type", "application/json")
+                    conn.outputStream.write(bodyStr.toByteArray())
+                }
                 r.put("status", conn.responseCode)
                 val stream = if (conn.responseCode >= 400) conn.errorStream else conn.inputStream
                 val text = stream?.bufferedReader()?.readText() ?: ""
                 r.put("len", text.length)
-                r.put("snippet", text.take(400))
+                r.put("snippet", text.take(1500))
             } catch (e: Exception) {
                 r.put("status", -1)
                 r.put("err", (e.message ?: "err").take(80))
@@ -88,7 +107,7 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
             online = scanner.devices.values.count { it.online }
         }
         val o = JSONObject()
-        o.put("ok", true); o.put("mode", "observer"); o.put("iface", "wifi"); o.put("ver", "2.10"); o.put("vercode", 21)
+        o.put("ok", true); o.put("mode", "observer"); o.put("iface", "wifi"); o.put("ver", "2.11"); o.put("vercode", 22)
         o.put("subnet", scanner.subnet); o.put("ip", phoneIp)
         o.put("uptime", System.currentTimeMillis() / 1000 - scanner.startTs)
         o.put("online", online); o.put("devices", total)

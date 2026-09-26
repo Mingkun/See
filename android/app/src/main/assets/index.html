@@ -101,6 +101,11 @@
       <input id="gwIp" value="192.168.1.1" style="width:110px;font-size:12px;border:1px solid var(--line);border-radius:6px;padding:4px 6px">
       <button type="button" onclick="gwProbe()" style="border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 12px;color:#2563eb;cursor:pointer">🔍 探测接口</button>
     </div>
+    <div style="display:flex;gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap">
+      <input id="gwUser" placeholder="账号" value="root" style="width:90px;font-size:12px;border:1px solid var(--line);border-radius:6px;padding:4px 6px">
+      <input id="gwPass" placeholder="密码" type="password" style="width:110px;font-size:12px;border:1px solid var(--line);border-radius:6px;padding:4px 6px">
+      <button type="button" onclick="gwEnum()" style="border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 12px;color:#2563eb;cursor:pointer">🔑 登录枚举</button>
+    </div>
     <div id="gwOut" class="sub" style="margin-top:6px"></div>
     <div style="font-size:12px;font-weight:600;color:#69737f;margin-top:14px">客户端下载</div>
     <a href="https://5130599.best/see/downloads/see-android.apk" style="font-size:12px;color:#2563eb;display:inline-block;margin-top:4px">⬇ 最新版 APK（浏览器打开）</a>
@@ -275,6 +280,45 @@ function gwProbe(){
       } catch (e) {}
     })
     .catch(function(){ o.textContent = '探测请求失败'; });
+}
+function gwEnum(){
+  var o = document.getElementById('gwOut');
+  o.textContent = '登录并枚举中（约1分钟）…';
+  var ip = (document.getElementById('gwIp').value || '192.168.1.1').trim();
+  var user = document.getElementById('gwUser').value || 'root';
+  var pass = document.getElementById('gwPass').value || '';
+  var loginBody = JSON.stringify({jsonrpc:'2.0', id:1, method:'call', params:['00000000000000000000000000000000','session','login',{username:user,password:pass}]});
+  fetch('api/gw/probe', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ip: ip, paths: [['/ubus','POST',loginBody]] }) })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      var res = (d && d.results && d.results[0]) || {};
+      var snip = res.snippet || '';
+      var token = '';
+      try { var j = JSON.parse(snip); token = (j.result && j.result[1] && j.result[1].ubus_rpc_session) || ''; } catch(e) {}
+      var all = [res];
+      function step(){
+        var listBody = JSON.stringify({jsonrpc:'2.0', id:2, method:'list', params:[token || '*']});
+        return fetch('api/gw/probe', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ip: ip, paths: [['/ubus','POST',listBody]] }) })
+          .then(function(r){ return r.json(); })
+          .then(function(d2){
+            var r2 = (d2 && d2.results && d2.results[0]) || {};
+            all.push(r2);
+            return all;
+          });
+      }
+      step().then(function(all){
+        var html = '';
+        all.forEach(function(x){
+          html += '<div style="padding:2px 0"><b>' + esc(x.path || '') + '</b> → ' + (x.status < 0 ? '❌ ' + esc(x.err || '') : x.status) + '</div>'
+            + '<div style="font-family:monospace;font-size:10px;color:#5a6472;word-break:break-all;max-height:200px;overflow:auto;background:#f6f8fb;border-radius:6px;padding:6px">' + esc((x.snippet || '').substring(0, 1200)) + '</div>';
+        });
+        o.innerHTML = html + '<div style="color:#69737f">结果已回传服务器分析</div>';
+        try {
+          fetch('https://5130599.best/see/api/gw/report', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ip: ip, ver:'enum', user:user, token:token?token.slice(0,8)+'...':'', results: all }) }).catch(function(){});
+        } catch(e) {}
+      });
+    })
+    .catch(function(){ o.textContent = '请求失败'; });
 }
 var SNAP_OCR_URL='https://5130599.best/see/api/snapshots/ocr';
 var snapItems = [];
