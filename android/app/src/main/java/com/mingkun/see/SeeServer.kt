@@ -17,12 +17,18 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
                 "/api/devices" -> devices()
                 "/api/events" -> events(session)
                 "/api/device" -> device(session)
+                "/api/scan" -> scanNow()
                 else -> newFixedLengthResponse(Status.NOT_FOUND, "text/plain", "404")
             }
         } catch (e: Exception) {
             newFixedLengthResponse(Status.INTERNAL_ERROR, "application/json",
                 JSONObject().put("ok", false).put("error", "${e.message}").toString())
         }
+    }
+
+    private fun scanNow(): Response {
+        scanner.scanNow()
+        return json(JSONObject().put("ok", true))
     }
 
     private fun json(o: JSONObject): Response =
@@ -41,7 +47,7 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
             online = scanner.devices.values.count { it.online }
         }
         val o = JSONObject()
-        o.put("ok", true); o.put("mode", "observer"); o.put("iface", "wifi"); o.put("ver", "1.5")
+        o.put("ok", true); o.put("mode", "observer"); o.put("iface", "wifi"); o.put("ver", "1.6")
         o.put("subnet", scanner.subnet); o.put("ip", phoneIp)
         o.put("uptime", System.currentTimeMillis() / 1000 - scanner.startTs)
         o.put("online", online); o.put("devices", total)
@@ -56,7 +62,7 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
         synchronized(scanner.lock) {
             for ((mac, d) in scanner.devices) {
                 val v = JSONObject()
-                v.put("mac", mac); v.put("ip", d.ip); v.put("hostname", d.hostname)
+                v.put("mac", if (mac.startsWith("ip:")) "" else mac); v.put("ip", d.ip); v.put("hostname", d.hostname)
                 v.put("vendor", d.vendor); v.put("online", d.online); v.put("last_seen", d.lastSeen)
                 v.put("speed", zeros()); v.put("session", zeros()); v.put("today", zeros())
                 arr.put(v)
@@ -92,7 +98,7 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
         }
         val v = JSONObject()
         if (dev != null) {
-            v.put("mac", mac); v.put("ip", ip); v.put("hostname", dev!!.hostname)
+            v.put("mac", if (mac.startsWith("ip:")) "" else mac); v.put("ip", ip); v.put("hostname", dev!!.hostname)
             v.put("vendor", dev!!.vendor); v.put("online", dev!!.online); v.put("last_seen", dev!!.lastSeen)
         } else {
             v.put("mac", ""); v.put("ip", ip); v.put("hostname", ""); v.put("vendor", "")

@@ -29,13 +29,17 @@ class Scanner(private val db: Db) : Thread() {
         }
         while (!isInterrupted) {
             try {
-                if (subnet.isNotBlank()) sweep()
+                if (subnet.isNotBlank()) { sweep(); lastError = "" }
+                else lastError = "未获取到网段（请连接WiFi）"
             } catch (e: Exception) {
                 lastError = (e.message ?: "err").take(120)
             }
-            Thread.sleep(10_000)
+            try { synchronized(wakeLock) { wakeLock.wait(10_000) } } catch (_: InterruptedException) { return }
         }
     }
+
+    private val wakeLock = Object()
+    fun scanNow() { synchronized(wakeLock) { wakeLock.notifyAll() } }
 
     private fun ipToLong(ip: String): Long =
         ip.split('.').fold(0L) { a, b -> (a shl 8) or (b.toLongOrNull() ?: 0) }
@@ -49,25 +53,29 @@ class Scanner(private val db: Db) : Thread() {
         val mask = (-1L shl hostBits) and 0xFFFFFFFFL
         val base = ipToLong(subnet.substringBefore('/')) and mask
         val count = minOf((1L shl hostBits) - 2, 510)
+        val alive = java.util.Collections.synchronizedSet(HashSet<String>())
         val pool = Executors.newFixedThreadPool(64)
         for (i in 1..count) {
             val ip = longToIp(base + i)
-            pool.execute { ping(ip) }
+            pool.execute { if (ping(ip)) alive.add(ip) }
         }
         pool.shutdown()
         try { pool.awaitTermination(25, TimeUnit.SECONDS) } catch (_: Exception) {}
-        merge(readArp())
+        val arp = readArp()
+        val found = LinkedHashMap<String, String>()
+        for ((ip, mac) in arp) found[ip] = mac
+        for (ip in alive) if (!found.containsKey(ip)) found[ip] = "ip:$ip"
+        merge(found)
         lastSweep = System.currentTimeMillis() / 1000
     }
 
-    private fun ping(ip: String) {
-        try {
-            val p = ProcessBuilder("/system/bin/ping", "-c", "1", "-W", "1", "-n", ip)
-                .redirectErrorStream(true).start()
-            p.waitFor()
-            p.destroy()
-        } catch (_: Exception) {}
-    }
+    private fun ping(ip: String): Boolean = try {
+        val p = ProcessBuilder("/system/bin/ping", "-c", "1", "-W", "1", "-n", ip)
+            .redirectErrorStream(true).start()
+        val ok = p.waitFor() == 0
+        p.destroy()
+        ok
+    } catch (_: Exception) { false }
 
     private fun readArp(): Map<String, String> {
         val out = mutableMapOf<String, String>()
@@ -91,14 +99,16 @@ class Scanner(private val db: Db) : Thread() {
                 if (d == null) {
                     devices[mac] = Dev(ip, "", "", now, true)
                     db.upsert(mac, ip, "", "", now)
+                    val hasMac = mac.length == 17 && !mac.startsWith("ip:")
                     thread {
-                        val h = hostname(ip); val v = vendor(mac)
+                        val h = hostname(ip)
+                        val v = if (hasMac) vendor(mac) else ""
                         synchronized(lock) { devices[mac]?.let { it.hostname = h; it.vendor = v } }
                         db.upsert(mac, ip, h, v, now)
                     }
                     if (mac !in knownMacs) {
                         knownMacs.add(mac)
-                        addEventLocked("join", ip, mac, "")
+                        addEventLocked("join", ip, if (hasMac) mac else "", "")
                     }
                 } else {
                     val wasOffline = !d.online

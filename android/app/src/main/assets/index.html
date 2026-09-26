@@ -60,7 +60,7 @@
     <div class="card"><div class="k">今日总流量</div><div class="v" id="cDay">–</div></div>
   </div>
   <div class="panel">
-    <div class="pt">设备</div>
+    <div class="pt" style="display:flex;justify-content:space-between;align-items:center"><span>设备</span><button id="scanBtn" onclick="doScan()" style="font-size:11px;border:1px solid #cdd6e0;background:#fff;border-radius:8px;padding:3px 10px;color:#2563eb">🔄 立即扫描</button></div>
     <div style="overflow-x:auto">
     <table>
       <thead><tr><th></th><th>设备</th><th>厂商</th><th>↓ 速度</th><th>↑ 速度</th><th>今日流量</th></tr></thead>
@@ -96,6 +96,10 @@ function fmtSpeed(b){ if(!b||b<1) return '0'; if(b<1024) return b.toFixed(0)+' B
 function fmtBytes(b){ if(!b) return '0'; if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(1)+' KB'; if(b<1073741824) return (b/1048576).toFixed(1)+' MB'; return (b/1073741824).toFixed(2)+' GB'; }
 function fmtTs(t){ var d=new Date(t*1000); return d.getHours()+':'+(d.getMinutes()<10?'0':'')+d.getMinutes(); }
 
+function doScan(){
+  var b=document.getElementById('scanBtn'); b.textContent='扫描中…';
+  fetch('api/scan').catch(function(){}).then(function(){ setTimeout(function(){ b.textContent='🔄 立即扫描'; },2000); });
+}
 function loadStatus(){
   fetch('api/status').then(function(r){return r.json()}).then(function(d){
     if(!d||!d.ok) return;
@@ -105,14 +109,14 @@ function loadStatus(){
     document.getElementById('cOn').textContent = d.online + '/' + d.devices;
     document.getElementById('cDn').textContent = fmtSpeed(d.total_speed.down);
     document.getElementById('cUp').textContent = fmtSpeed(d.total_speed.up);
-    document.getElementById('netInfo').textContent = '手机IP '+d.ip+' · 网段 '+d.subnet+' · 观察模式（接入/在线）；同一WiFi其他设备可访问 http://'+(d.ip||'手机IP')+':5050/';
+    document.getElementById('netInfo').textContent = '手机IP '+d.ip+' · 网段 '+d.subnet+' · 观察模式（接入/在线）'+(d.scan_error?' · '+d.scan_error:'')+'；同一WiFi其他设备可访问 http://'+(d.ip||'手机IP')+':5050/';
   }).catch(function(){});
 }
 function loadDevices(){
   fetch('api/devices').then(function(r){return r.json()}).then(function(d){
     if(!d||!d.ok) return;
     var day=0, b=document.getElementById('devBody');
-    if(!d.devices.length){ b.innerHTML='<tr><td colspan="6" class="hint">暂未发现设备（等扫描）</td></tr>'; return; }
+    if(!d.devices.length){ b.innerHTML='<tr><td colspan="6" class="hint">暂未发现设备 · 确保已连WiFi；点右上「立即扫描」（首轮约10-30秒；若路由器开了AP隔离则互相不可见）</td></tr>'; return; }
     var html='';
     d.devices.forEach(function(v){
       day += (v.today.up||0)+(v.today.down||0);
