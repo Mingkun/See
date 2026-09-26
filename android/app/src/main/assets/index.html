@@ -158,6 +158,12 @@
       <button type="button" onclick="gwRemote()" style="border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 12px;color:#2563eb;cursor:pointer">🌐 远程探测</button>
     </div>
     <div id="gwOut" class="sub" style="margin-top:6px"></div>
+    <div style="font-size:12px;font-weight:600;color:#69737f;margin-top:14px">后台保活</div>
+    <div class="sub" style="margin-top:2px">开启实时设备后，本机前台服务会持续采集并上传服务器（关掉界面也继续）；开机后会自动恢复。</div>
+    <div style="display:flex;gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap">
+      <button type="button" onclick="battery()" style="border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 12px;color:#2563eb;cursor:pointer">🔋 电池白名单</button>
+      <button type="button" onclick="appSettings()" style="border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 12px;color:#2563eb;cursor:pointer">⚙ 系统设置（自启动）</button>
+    </div>
     <div style="font-size:12px;font-weight:600;color:#69737f;margin-top:14px">客户端下载</div>
     <a href="https://5130599.best/see/downloads/see-android.apk" style="font-size:12px;color:#2563eb;display:inline-block;margin-top:4px">⬇ 最新版 APK（浏览器打开）</a>
   </div>
@@ -549,6 +555,8 @@ function gwBoot(){
     try { if (window.SeeBridge && SeeBridge.gwBg) SeeBridge.gwBg(true); } catch(e) {}
   }
 }
+function battery(){ try { if (window.SeeBridge && SeeBridge.battery) SeeBridge.battery(); } catch(e) {} }
+function appSettings(){ try { if (window.SeeBridge && SeeBridge.appSettings) SeeBridge.appSettings(); } catch(e) {} }
 function gwLoad(){
   // 先用本地缓存即时生效，再向服务器拉取统一配置覆盖
   try { gwApply(JSON.parse(localStorage.getItem('gwCfg') || '{}')); } catch(e) {}
