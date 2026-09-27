@@ -380,7 +380,7 @@ function loadDevices(){
       day += (v.today.up||0)+(v.today.down||0);
       html+='<tr class="dev'+(SEL_IP && selOf(v) === SEL_IP ? ' pinned' : '')+'" data-ip="'+esc(v.ip)+'">'
         +'<td><span class="dot'+(v.online?' on':'')+'"></span></td>'
-        +'<td><div class="name" title="'+escA(v.hostname||v.type||v.ip)+'">'+esc(cutName(v.hostname||v.type||v.ip, 10))+'</div><div class="sub">'+esc([v.ip, v.hostname?(v.type||''):'', v.mac].filter(Boolean).join(' · '))+'</div></td>'
+        +'<td><div class="name" title="'+escA(v.hostname||v.type||v.ip)+'">'+esc(cutName(v.hostname||v.type||v.ip, 12))+'</div><div class="sub">'+esc([v.ip, v.hostname?(v.type||''):'', v.mac].filter(Boolean).join(' · '))+'</div></td>'
         +'<td class="num dn">'+fmtSpeed(v.speed.down)+'</td>'
         +'<td class="num up">'+fmtSpeed(v.speed.up)+'</td>'
         +'<td class="num">'+fmtBytes((v.today.up||0)+(v.today.down||0))+'</td></tr>';
@@ -809,7 +809,7 @@ function gwPaint(){
     b.innerHTML = ds.map(function(d){
       return '<tr' + (SEL_IP && selOf(d) === SEL_IP ? ' class="pinned"' : '') + '>'
         + '<td class="sub">' + gwLink(d) + '</td>'
-        + '<td><div class="name" title="' + escA(d.name || d.ip) + '">' + esc(cutName(d.name || d.ip, 10)) + '</div><div class="sub">' + esc(d.ip) + '</div></td>'
+        + '<td><div class="name" title="' + escA(d.name || d.ip) + '">' + esc(cutName(d.name || d.ip, 12)) + '</div><div class="sub">' + esc(d.ip) + '</div></td>'
         + '<td class="num dn">' + fmtSpeed(d.down) + '</td>'
         + '<td class="num up">' + fmtSpeed(d.up) + '</td>'
         + '<td class="sub">' + esc(gwDur(d.online_time)) + '</td></tr>';
