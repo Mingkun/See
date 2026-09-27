@@ -57,6 +57,12 @@ class Db(ctx: Context) : SQLiteOpenHelper(ctx, "see.db", null, 2) {
         writableDatabase.insert("events", null, cv)
     }
 
+    /** 清空观察页历史：动态事件记录 + 已发现设备（避免下次启动把旧设备回填进列表）。 */
+    fun clearHistory() {
+        writableDatabase.delete("events", null, null)
+        writableDatabase.delete("devices", null, null)
+    }
+
     // ---- 网关流量采样 ----
 
     fun addSample(ts: Long, devkey: String, name: String, ip: String, present: Int, up: Double, down: Double) {

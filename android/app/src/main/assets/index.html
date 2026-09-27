@@ -341,7 +341,12 @@ function fmtTs(t){ var d=new Date(t*1000); return d.getHours()+':'+(d.getMinutes
 
 function doScan(){
   var b=document.getElementById('scanBtn'); b.textContent='扫描中…';
-  fetch('api/scan').catch(function(){}).then(function(){ setTimeout(function(){ b.textContent='🔄 立即扫描'; },2000); });
+  // 先清空观察页历史（设备表 + 动态），给用户一个干净的起点，再由新一轮扫描填充
+  var db=document.getElementById('devBody');
+  if(db) db.innerHTML='<tr><td colspan="5" class="hint">已清空历史 · 正在重新扫描…</td></tr>';
+  var eb=document.getElementById('evBody');
+  if(eb) eb.innerHTML='<div class="hint">已清空历史 · 等待新一轮动态…</div>';
+  fetch('api/scan').catch(function(){}).then(function(){ setTimeout(function(){ b.textContent='🔄 立即扫描'; loadDevices(); loadEvents(); },2000); });
 }
 function loadStatus(){
   fetch('api/status').then(function(r){return r.json()}).then(function(d){

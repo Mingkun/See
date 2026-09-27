@@ -43,6 +43,15 @@ class Scanner(private val db: Db) : Thread() {
     private val wakeLock = Object()
     fun scanNow() { synchronized(wakeLock) { wakeLock.notifyAll() } }
 
+    /** 点「立即扫描」时先把观察页的历史清掉：设备列表 + 动态事件（含本地库），再重新扫。 */
+    fun resetHistory() {
+        synchronized(lock) {
+            events.clear()
+            devices.clear()
+        }
+        db.clearHistory()
+    }
+
     private fun ipToLong(ip: String): Long =
         ip.split('.').fold(0L) { a, b -> (a shl 8) or (b.toLongOrNull() ?: 0) }
 
