@@ -288,7 +288,7 @@
     </div>
   </div>
   <div class="panel">
-    <div class="pt">📊 分时用量（1 小时一格）</div>
+    <div class="pt"><span>📊 分时用量（1 小时一格）</span><button type="button" class="btn sm" id="anHourOrder" onclick="toggleHourOrder()">↓ 倒序</button></div>
     <div class="scrollx">
       <table>
         <thead><tr><th>小时</th><th>平均速率</th><th>峰值</th><th>状态</th></tr></thead>
@@ -377,6 +377,16 @@ function seeTab(w){
 
 <script>
 var curIp = '';
+var AN_HOUR_ASC = [];    // 分时用量表：按时间由早到晚生成的原始行（HTML 片段）
+var AN_HOUR_DESC = false; // 是否倒序显示（最新的一小时排在最上面）
+function paintHourRows(){
+  var hb = document.getElementById('anHourBody'); if (!hb) return;
+  var rs = AN_HOUR_DESC ? AN_HOUR_ASC.slice().reverse() : AN_HOUR_ASC;
+  hb.innerHTML = rs.length ? rs.join('') : '<tr><td colspan="4" class="hint">—</td></tr>';
+  var b = document.getElementById('anHourOrder');
+  if (b) b.textContent = AN_HOUR_DESC ? '↑ 正序' : '↓ 倒序';
+}
+function toggleHourOrder(){ AN_HOUR_DESC = !AN_HOUR_DESC; paintHourRows(); }
 var SELF_IP = '';   // 本机在局域网里的 IP（来自本机 SeeServer 的 /api/status），用于把本机设备名标蓝
 function isSelf(x){ var ip = String((x && (x.ip || x.key)) || ''); return !!SELF_IP && ip === SELF_IP; }
 function esc(s){ var d=document.createElement('div'); d.textContent=s==null?'':String(s); return d.innerHTML; }
@@ -1204,7 +1214,7 @@ function anRender(j){
     }).join('');
   }
   document.getElementById('anSleepPanel').style.display = '';
-  var hb = document.getElementById('anHourBody'), rows = [];
+  var rows = [];
   var nh = Math.floor(n / 60);
   var today = anDayLbl(j.now || Math.floor(Date.now() / 1000));
   for (var h3 = 0; h3 < nh; h3++){
@@ -1219,7 +1229,8 @@ function anRender(j){
     var rcls = (cur || anDayLbl(t0) === today) ? 'today' : 'prev';
     rows.push('<tr class="' + rcls + '"><td class="num' + (cur ? ' curhour' : '') + '">' + hlbl + '</td><td class="num">' + fmtSpeed(tot / ct2) + '</td><td class="num">' + fmtSpeed(mx) + '</td><td>' + st + '</td></tr>');
   }
-  hb.innerHTML = rows.join('');
+  AN_HOUR_ASC = rows;
+  paintHourRows();
   var cover = 0; for (var q = 0; q < n; q++) if (hs[q]) cover++;
   document.getElementById('anSub').textContent = (j.name || j.ip || AN.key) + ' · ' + anFmtDur(n) + '窗口';
   document.getElementById('anAxisTxt').textContent = '横轴 0–' + HRS + ' 时';
