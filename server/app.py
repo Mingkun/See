@@ -239,6 +239,9 @@ def _cors(resp):
 
 
 CFG_PATH = os.path.join(ROOT, 'data', 'gw-config.json')
+PREF_PATH = os.path.join(ROOT, 'data', 'ui-prefs.json')
+# 允许存到后端的界面偏好（白名单，值是类型），换设备登录也认这份
+PREF_KEYS = {'hour_desc': bool}
 KEY_PATH = os.path.join(ROOT, 'data', 'api-key.txt')
 # 换密钥时的过渡：旧密钥放这里，只在 KEY_GRACE_HOURS 内认（到期自动作废，文件不用删）
 KEY_PREV_PATH = os.path.join(ROOT, 'data', 'api-key.prev')
@@ -403,6 +406,26 @@ def _deny():
     return jsonify(ok=False, error='unauthorized'), 401
 
 
+def _load_prefs():
+    try:
+        with open(PREF_PATH, encoding='utf-8') as f:
+            d = json.load(f)
+        if not isinstance(d, dict):
+            return {}
+        return {k: v for k, v in d.items() if k in PREF_KEYS and isinstance(v, PREF_KEYS[k])}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _save_prefs(d):
+    os.makedirs(os.path.dirname(PREF_PATH), exist_ok=True)
+    tmp = PREF_PATH + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(d, f)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, PREF_PATH)
+
+
 def _public_cfg(cfg):
     """给网页/App 的配置：网关密码只报「有没有、几位」，永不回明文。"""
     out = dict(cfg)
@@ -520,6 +543,31 @@ def api_session_kill():
         return _deny()
     _save_sessions({})
     return jsonify(ok=True)
+
+
+@app.route('/api/prefs', methods=['OPTIONS', 'GET', 'POST'])
+def api_prefs():
+    """界面偏好存后端：登录后可见可改，换设备/重登都认这份。"""
+    if request.method == 'OPTIONS':
+        return _opt('GET, POST, OPTIONS')
+    kind = _auth_kind()
+    if kind is None:
+        return _deny()
+    if request.method == 'GET':
+        return jsonify(ok=True, prefs=_load_prefs())
+    if kind != 'sess':
+        return _deny()
+    data = request.get_json(force=True, silent=True) or {}
+    k = data.get('key')
+    if k not in PREF_KEYS:
+        return jsonify(ok=False, error='不认识的偏好项'), 400
+    v = data.get('value')
+    if not isinstance(v, PREF_KEYS[k]):
+        return jsonify(ok=False, error='值类型不对'), 400
+    d = _load_prefs()
+    d[k] = v
+    _save_prefs(d)
+    return jsonify(ok=True, prefs=d)
 
 
 @app.route('/api/machine-key', methods=['OPTIONS', 'GET'])

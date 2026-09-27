@@ -378,7 +378,22 @@ function seeTab(w){
 <script>
 var curIp = '';
 var AN_HOUR_ASC = [];    // 分时用量表：按时间由早到晚生成的原始行（HTML 片段）
-var AN_HOUR_DESC = false; // 是否倒序显示（最新的一小时排在最上面）
+var AN_HOUR_DESC = false; // 是否倒序显示（最新的一小时排在最上面）；真值存在后端 data/ui-prefs.json
+var UI_PREFS = {};        // 后端保存的界面偏好，重登/换设备都读这份
+function loadPrefs(){
+  return apiFetch(API + '/prefs').then(function(r){ return r.json(); }).then(function(j){
+    if (j && j.ok && j.prefs){
+      UI_PREFS = j.prefs;
+      AN_HOUR_DESC = !!UI_PREFS.hour_desc;
+      paintHourRows();
+    }
+  }).catch(function(){});
+}
+function savePref(k, v){
+  UI_PREFS[k] = v;
+  apiFetch(API + '/prefs', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key: k, value: v }) }).catch(function(){});
+}
 function paintHourRows(){
   var hb = document.getElementById('anHourBody'); if (!hb) return;
   var rs = AN_HOUR_DESC ? AN_HOUR_ASC.slice().reverse() : AN_HOUR_ASC;
@@ -386,7 +401,11 @@ function paintHourRows(){
   var b = document.getElementById('anHourOrder');
   if (b) b.textContent = AN_HOUR_DESC ? '↑ 正序' : '↓ 倒序';
 }
-function toggleHourOrder(){ AN_HOUR_DESC = !AN_HOUR_DESC; paintHourRows(); }
+function toggleHourOrder(){
+  AN_HOUR_DESC = !AN_HOUR_DESC;
+  paintHourRows();
+  savePref('hour_desc', AN_HOUR_DESC);
+}
 var SELF_IP = '';   // 本机在局域网里的 IP（来自本机 SeeServer 的 /api/status），用于把本机设备名标蓝
 function isSelf(x){ var ip = String((x && (x.ip || x.key)) || ''); return !!SELF_IP && ip === SELF_IP; }
 function esc(s){ var d=document.createElement('div'); d.textContent=s==null?'':String(s); return d.innerHTML; }
@@ -748,6 +767,7 @@ function copyMc(){
   var o = document.getElementById('gwOut'); if (o) o.textContent = '密钥已复制（别贴到聊天里）';
 }
 function boot(){
+  loadPrefs();
   gwLoad(); loadStatus(); loadDevices(); loadEvents(); anInit();
   loadMcKey();
 }
