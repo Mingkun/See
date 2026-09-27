@@ -114,6 +114,11 @@
            white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .ddopt.on { background:#eef4ff; color:var(--brand); font-weight:600; }
   .ddopt:active { background:#f6f8fb; }
+  /* 分时用量：当前小时用红字闪动标识 */
+  .curhour { color:#dc2626 !important; font-weight:600;
+             -webkit-animation: curblink 1s ease-in-out infinite; animation: curblink 1s ease-in-out infinite; }
+  @-webkit-keyframes curblink { 50% { opacity:.2; } }
+  @keyframes curblink { 50% { opacity:.2; } }
   .w88 { width:88px; } .w90 { width:90px; } .w110 { width:110px; }
   .grow { flex:1; min-width:0; }
 
@@ -928,8 +933,8 @@ function anRender(j){
     // 行序即时间先后（由早到晚，索引 0 为窗口起点）
     var hlbl = anHMin(t0) + '–' + anHMin(t1);
     if (h3 === 0 || anDayLbl(t0) !== anDayLbl(t0 - 3600)) hlbl = anDayLbl(t0) + ' ' + hlbl;
-    if (j.now && t1 > j.now) hlbl += ' <span class="sub fs-xs">进行中</span>';
-    rows.push('<tr><td class="num">' + hlbl + '</td><td class="num">' + fmtSpeed(tot / ct2) + '</td><td class="num">' + fmtSpeed(mx) + '</td><td>' + st + '</td></tr>');
+    var cur = j.now && t1 > j.now;   // 覆盖 now 的那一格 = 当前小时
+    rows.push('<tr><td class="num' + (cur ? ' curhour' : '') + '">' + hlbl + '</td><td class="num">' + fmtSpeed(tot / ct2) + '</td><td class="num">' + fmtSpeed(mx) + '</td><td>' + st + '</td></tr>');
   }
   hb.innerHTML = rows.join('');
   var cover = 0; for (var q = 0; q < n; q++) if (hs[q]) cover++;
