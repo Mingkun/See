@@ -47,7 +47,7 @@ if ! command -v python3 >/dev/null 2>&1; then
 fi
 python3 -V
 
-echo "==> [2/7] 安装到 /opt/see"
+echo "==> [3/7] 安装到 /opt/see"
 $SUDO mkdir -p /opt/see /etc/see
 $SUDO install -m 755 see_collector.py /opt/see/see_collector.py
 
