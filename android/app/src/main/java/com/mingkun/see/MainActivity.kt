@@ -18,6 +18,7 @@ class MainActivity : Activity() {
     private var retries: Int? = 0
     private var filePathCallback: android.webkit.ValueCallback<Array<android.net.Uri>>? = null
     private var updateDownloadId = -1L
+    private var pendingApkName: String? = null
 
     inner class Bridge {
         @android.webkit.JavascriptInterface
@@ -72,21 +73,37 @@ class MainActivity : Activity() {
                 android.app.AlertDialog.Builder(this@MainActivity)
                     .setTitle("发现新版本")
                     .setMessage("see v" + ver + " 可用，下载并安装？")
-                    .setPositiveButton("下载") { _, _ -> downloadAndInstall(url) }
+                    .setPositiveButton("下载") { _, _ -> downloadAndInstall(ver, url) }
                     .setNegativeButton("取消", null)
                     .show()
             }
         }
     }
 
-    private fun downloadAndInstall(url: String) {
+    /**
+     * 清掉历史更新包。DownloadManager 不会覆盖已存在的目标文件：若沿用同名目标，
+     * 下载会静默失败，通知栏里残留的旧通知被点开就会安装旧包，系统报「已存在更高版本」。
+     */
+    private fun purgeStaleApks(keep: String? = null) {
+        val dir = getExternalFilesDir(null) ?: return
+        dir.listFiles()?.forEach { f ->
+            if (f.name.startsWith("see-update") && f.name.endsWith(".apk") && f.name != keep) {
+                try { f.delete() } catch (_: Exception) {}
+            }
+        }
+    }
+
+    private fun downloadAndInstall(ver: String, url: String) {
+        val dest = "see-update-" + ver.replace(Regex("[^0-9A-Za-z._-]"), "_") + ".apk"
+        pendingApkName = dest
+        purgeStaleApks(dest)
         try {
             val request = android.app.DownloadManager.Request(android.net.Uri.parse(url))
-            request.setTitle("see 更新")
+            request.setTitle("see 更新 v" + ver)
             request.setMimeType("application/vnd.android.package-archive")
             request.addRequestHeader("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
             request.setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            request.setDestinationInExternalFilesDir(this, null, "see-update.apk")
+            request.setDestinationInExternalFilesDir(this, null, dest)
             val dm = getSystemService(DOWNLOAD_SERVICE) as android.app.DownloadManager
             updateDownloadId = dm.enqueue(request)
         } catch (e: Exception) {
@@ -97,8 +114,10 @@ class MainActivity : Activity() {
     private fun openDownloadedApk() {
         try {
             val dir = getExternalFilesDir(null) ?: return
-            val file = java.io.File(dir, "see-update.apk")
-            if (!file.exists()) return
+            val file = (pendingApkName?.let { java.io.File(dir, it) })?.takeIf { it.exists() }
+                ?: dir.listFiles()?.filter { it.name.startsWith("see-update") && it.name.endsWith(".apk") }
+                    ?.maxByOrNull { it.lastModified() }
+            if (file == null || !file.exists()) return
             val uri = androidx.core.content.FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
             val install = android.content.Intent(android.content.Intent.ACTION_VIEW)
             install.setDataAndType(uri, "application/vnd.android.package-archive")
@@ -163,7 +182,10 @@ class MainActivity : Activity() {
                 request.addRequestHeader("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
                 request.setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 if (isApk) {
-                    request.setDestinationInExternalFilesDir(this, null, "see-update.apk")
+                    val dest = "see-update-" + System.currentTimeMillis() + ".apk"
+                    pendingApkName = dest
+                    purgeStaleApks(dest)
+                    request.setDestinationInExternalFilesDir(this, null, dest)
                 } else {
                     request.setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, name)
                 }
