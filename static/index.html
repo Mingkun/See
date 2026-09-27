@@ -58,7 +58,6 @@
   .tbl-dense td { padding:7px 5px; }
   /* 图标格跟设备名那一行走：默认 middle 会卡在「名称+IP」两行中间，跟谁都对不齐 */
   .tbl-dense td:first-child { vertical-align:top; padding-top:7px; line-height:15.5px; }
-  .ico { display:inline-block; font-size:12px; line-height:15.5px; }
   .bdg { font-weight:600; }
   #gwPanel .pt { font-size:var(--fs-sm); }
   #gwPanel .pt .sub { font-size:var(--fs-xs); }
@@ -195,8 +194,8 @@
     <div class="pt"><span>网关设备（实时）</span><span class="sub" id="gwSum"></span></div>
     <div class="scrollx">
       <table class="tbl-dense">
-        <thead><tr><th></th><th>设备</th><th>品牌</th><th>↓ 速度</th><th>↑ 速度</th><th>在线</th></tr></thead>
-        <tbody id="gwBody"><tr><td colspan="6" class="hint">加载中…</td></tr></tbody>
+        <thead><tr><th>设备</th><th>品牌</th><th>↓ 速度</th><th>↑ 速度</th><th>在线</th></tr></thead>
+        <tbody id="gwBody"><tr><td colspan="5" class="hint">加载中…</td></tr></tbody>
       </table>
     </div>
     <div class="hint" id="gwErr"></div>
@@ -697,9 +696,6 @@ function devMeta(d){
   for (i = 0; i < KINDS.length && !kd; i++) for (j = 0; j < KINDS[i].k.length; j++) { if (s.indexOf(KINDS[i].k[j]) >= 0) { kd = KINDS[i]; break; } }
   return { br: br, kd: kd };
 }
-function devIcon(m){
-  return m.kd ? m.kd.i : '🧩';
-}
 function gwTick(){
   if (!GW.on) return;
   var body = { ip: GW.ip, user: GW.user };
@@ -710,20 +706,20 @@ function gwTick(){
       var b = document.getElementById('gwBody'), s = document.getElementById('gwSum'), e = document.getElementById('gwErr');
       if (!j || !j.ok) {
         if (e) e.textContent = '❌ ' + ((j && j.error) || '拉取失败');
-        if (b) b.innerHTML = '<tr><td colspan="6" class="hint">—</td></tr>';
+        if (b) b.innerHTML = '<tr><td colspan="5" class="hint">—</td></tr>';
         if (s) s.textContent = '';
         return;
       }
       if (e) e.textContent = '';
       var ds = (j.devices || []).slice().sort(function(x, y){ return (y.down + y.up) - (x.down + x.up); });
       if (b) {
-        if (!ds.length) { b.innerHTML = '<tr><td colspan="6" class="hint">无设备</td></tr>'; }
+        if (!ds.length) { b.innerHTML = '<tr><td colspan="5" class="hint">无设备</td></tr>'; }
         else {
           b.innerHTML = ds.map(function(d){
             var m = devMeta(d), kd = m.kd, br = m.br;
             var lbl = br ? br.n : (kd ? kd.l : '');
             var link = d.link === 'wifi' ? '📶' : '🔌';
-            return '<tr><td><span class="ico">' + devIcon(m) + '</span></td>'
+            return '<tr>'
               + '<td><div class="name">' + esc(d.name || d.ip) + '</div><div class="sub">' + link + ' ' + esc(d.ip) + '</div></td>'
               + '<td class="sub">' + (lbl ? '<span class="bdg" style="color:' + (br ? br.c : '#94a3b8') + '">' + esc(lbl) + '</span>' : '') + '</td>'
               + '<td class="num dn">' + fmtSpeed(d.down) + '</td>'
