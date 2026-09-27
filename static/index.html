@@ -386,7 +386,7 @@ function loadStatus(){
   fetch('api/status').then(function(r){return r.json()}).then(function(d){
     if(!d||!d.ok) return;
     if (d.ip) SELF_IP = String(d.ip);
-    document.getElementById('netInfo').textContent = '手机IP '+d.ip+' · 网段 '+d.subnet+' · 观察模式（接入/在线）'+(d.scan_error?' · '+d.scan_error:'')+'；同一WiFi其他设备可访问 http://'+(d.ip||'手机IP')+':5050/';
+    document.getElementById('netInfo').textContent = '手机IP '+d.ip+' · 网段 '+d.subnet+' · 观察模式（接入/在线）'+(d.scan_error?' · '+d.scan_error:'');
   }).catch(function(){});
 }
 function loadDevices(){
