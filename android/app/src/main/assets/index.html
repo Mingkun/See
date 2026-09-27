@@ -67,6 +67,10 @@
   .tbl-dense td { padding:7px 5px; }
   /* 图标格跟设备名那一行走：默认 middle 会卡在「名称+IP」两行中间，跟谁都对不齐 */
   .tbl-dense td:first-child { vertical-align:top; padding-top:7px; line-height:15.5px; }
+  /* 观察页设备列表：字号整体降一档，只动字号不动内边距 */
+  .tbl-dev { font-size:var(--fs-sm); }
+  .tbl-dev th { font-size:var(--fs-xs); }
+  .tbl-dev .sub { font-size:var(--fs-xs); }
   .bdg { font-weight:600; }
   .sorth { cursor:pointer; -webkit-user-select:none; user-select:none; }
   .arw { color:var(--brand); font-size:9px; }
@@ -216,7 +220,7 @@
   <div class="panel">
     <div class="pt"><span>设备</span><button id="scanBtn" onclick="doScan()" class="btn sm">🔄 立即扫描</button></div>
     <div class="scrollx">
-    <table>
+    <table class="tbl-dev">
       <thead><tr><th></th><th>设备</th><th>↓ 速度</th><th>↑ 速度</th><th>今日流量</th></tr></thead>
       <tbody id="devBody"><tr><td colspan="5" class="hint">加载中…</td></tr></tbody>
     </table>
