@@ -41,6 +41,9 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
         <receiver
+            android:name=".GwAlarmReceiver"
+            android:exported="false" />
+        <receiver
             android:name=".BootReceiver"
             android:exported="true"
             android:enabled="true">

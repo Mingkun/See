@@ -47,10 +47,17 @@ class Store:
                     'INSERT INTO devices(mac, ip, hostname, vendor, first_seen, last_seen) VALUES(?,?,?,?,?,?)',
                     (mac, ip, hostname or '', vendor or '', ts, ts))
             else:
+                sets = ['ip=?', 'last_seen=?']
+                vals = [ip, ts]
+                if hostname:
+                    sets.append('hostname=?')
+                    vals.append(hostname)
+                if vendor:
+                    sets.append('vendor=?')
+                    vals.append(vendor)
+                vals.append(mac)
                 self._db.execute(
-                    'UPDATE devices SET ip=?, last_seen=?, hostname=CASE WHEN ?<>'' THEN ? ELSE hostname END,'
-                    ' vendor=CASE WHEN ?<>'' THEN ? ELSE vendor END WHERE mac=?',
-                    (ip, ts, hostname or '', hostname or '', vendor or '', vendor or '', mac))
+                    'UPDATE devices SET ' + ', '.join(sets) + ' WHERE mac=?', vals)
             self._db.commit()
 
     def all_devices(self):
@@ -123,7 +130,7 @@ class Store:
             return 0
         with self._lock:
             self._db.executemany(
-                'INSERT INTO gw_samples(ts, devkey, name, ip, present, up, down) VALUES(?,?,?,?,?,?,?)', vals)
+                'INSERT OR IGNORE INTO gw_samples(ts, devkey, name, ip, present, up, down) VALUES(?,?,?,?,?,?,?)', vals)
             self._db.commit()
         return len(vals)
 

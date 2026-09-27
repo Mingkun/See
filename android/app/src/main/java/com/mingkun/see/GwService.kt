@@ -52,6 +52,7 @@ class GwService : Service() {
     private val buf = ArrayList<Array<Any>>()
     private var lastUpTs = 0L
     private var lastPruneHint = 0L
+    private val locks by lazy { GwLocks(this) }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -61,20 +62,35 @@ class GwService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForegroundSafe()
-        running = true
-        Thread {
-            try {
-                loop()
-            } catch (e: Exception) {
-                // 出错也不崩服务
-            }
+        if (intent?.action == "stop") {
             running = false
+            GwAlarm.cancel(this)
             try { stopForeground(true) } catch (_: Exception) {}
             stopSelf()
-        }.start()
+            return START_NOT_STICKY
+        }
+        startForegroundSafe()
+        running = true
+        locks.acquire()
+        // 防 Doze：每 15 分钟由闹钟把自己拉起来（空闲也允许）
+        GwAlarm.schedule(this)
+        if (worker == null || worker?.isAlive != true) {
+            worker = Thread {
+                try {
+                    loop()
+                } catch (e: Exception) {
+                    // 出错也不崩服务
+                }
+                running = false
+                locks.release()
+                try { stopForeground(true) } catch (_: Exception) {}
+                stopSelf()
+            }.also { it.start() }
+        }
         return START_STICKY
     }
+
+    @Volatile private var worker: Thread? = null
 
     private fun startForegroundSafe() {
         try {
@@ -108,6 +124,7 @@ class GwService : Service() {
 
     override fun onDestroy() {
         running = false
+        locks.release()
         super.onDestroy()
     }
 
