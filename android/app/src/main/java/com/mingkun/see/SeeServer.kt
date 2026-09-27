@@ -102,6 +102,9 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
     @Volatile private var gwHttp = 0      // 最近一次网关响应的 HTTP 状态码
     @Volatile private var gwLen = 0       // 最近一次网关响应的字节数
     @Volatile private var gwLoginIp = ""
+    @Volatile private var gwToken = ""          // 网关页面里的 token（devInfo 需要）
+    @Volatile private var gwLinkCache: HashMap<String, String>? = null  // ip -> wired/wifi
+    @Volatile private var gwLinkTs = 0L
     @Volatile private var lastRecTs = 0L
     @Volatile private var lastPruneTs = 0L
 
@@ -128,6 +131,7 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
         } catch (e: Exception) {}
         return try {
             val stale = (System.currentTimeMillis() - gwLoginTs > 120000L) || gwLoginIp != ip
+            if (gwLoginIp != ip) { gwToken = ""; gwLinkCache = null }
             if (stale) gwLogin(ip, user, pw)
             var txt = gwGet(ip, "/cgi-bin/luci/admin/allInfo")
             var tries = 0
@@ -143,13 +147,16 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
                         .put("http", gwHttp).put("len", gwLen).put("snip", snippet(txt)).toString())
             } else {
                 val j = JSONObject(txt)
+                // 链路类型走网关权威接口：devInfo type=0=有线 / type=1=无线
+                // （allInfo 的 pc*/wifi* 只是槽位索引，会漂移，不能当链路类型用）
+                val links = gwLinkMap(ip, user, pw)
                 val arr = JSONArray()
                 for (k in j.keys()) {
                     if (!(k.startsWith("pc") || k.startsWith("wifi"))) continue
                     val d = j.optJSONObject(k) ?: continue
                     val o = JSONObject()
                     o.put("key", k)
-                    o.put("link", if (k.startsWith("wifi")) "wifi" else "wired")
+                    o.put("link", links[d.optString("ip")] ?: if (k.startsWith("wifi")) "wifi" else "wired")
                     var nm = d.optString("model")
                     if (nm.isEmpty()) nm = d.optString("devName")
                     if (nm.isEmpty()) nm = d.optString("brand")
@@ -212,6 +219,59 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
         gwHttp = code
         gwLen = t.length
         return t
+    }
+
+    private fun gwPost(ip: String, path: String, body: String): String {
+        val conn = (java.net.URL("http://" + ip + path)).openConnection() as HttpURLConnection
+        conn.connectTimeout = 4000
+        conn.readTimeout = 6000
+        conn.requestMethod = "POST"
+        conn.doOutput = true
+        conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14)")
+        conn.outputStream.write(body.toByteArray())
+        val code = conn.responseCode
+        val s = if (code >= 400) conn.errorStream else conn.inputStream
+        return s?.bufferedReader()?.readText() ?: ""
+    }
+
+    /**
+     * 网关权威的「有线 / 无线」口径。
+     * 网关自己的页面就是这么分的：POST /cgi-bin/luci/admin/device/devInfo {type:0}
+     * → 「当前通过网线连接的设备」；{type:1} → 「当前通过无线连接的设备」。
+     * 反例（实测）：192.168.1.12 同一台 Mate 40 Pro，一次是 wifi4、一次是 pc3 —— 
+     * 说明 allInfo 的 pc 开头 / wifi 开头键只是**槽位索引**，会随设备上下线漂移，绝不能当链路类型。
+     * 拿不到就返回空表，调用方退回旧的槽位猜测。
+     */
+    private fun gwLinkMap(ip: String, user: String, pw: String): HashMap<String, String> {
+        val now = System.currentTimeMillis()
+        val cached = gwLinkCache
+        if (cached != null && now - gwLinkTs < 60000) return cached
+        val m = HashMap<String, String>()
+        try {
+            if (gwToken.isEmpty()) {
+                val page = gwGet(ip, "/cgi-bin/luci/admin/device/pc")
+                Regex("token\\s*:\\s*'([0-9a-zA-Z]+)'").find(page)?.let { gwToken = it.groupValues[1] }
+            }
+            for ((t, v) in listOf("0" to "wired", "1" to "wifi")) {
+                val body = (if (gwToken.isNotEmpty()) "token=" + gwToken + "&" else "") + "type=" + t
+                var txt = gwPost(ip, "/cgi-bin/luci/admin/device/devInfo", body)
+                if (!txt.trimStart().startsWith("{")) {
+                    gwLogin(ip, user, pw)
+                    gwToken = ""
+                    txt = gwPost(ip, "/cgi-bin/luci/admin/device/devInfo", "type=" + t)
+                }
+                if (!txt.trimStart().startsWith("{")) continue
+                val j = JSONObject(txt)
+                for (k in j.keys()) {
+                    if (!k.startsWith("dev")) continue
+                    val dip = (j.optJSONObject(k) ?: continue).optString("ip")
+                    if (dip.isNotEmpty() && dip != "--") m[dip] = v
+                }
+            }
+        } catch (e: Exception) { }
+        if (m.isNotEmpty()) { gwLinkCache = m; gwLinkTs = now }
+        return m
     }
 
     /** 页面给用户看的短摘要：剥离 HTML 标签与空白 */
@@ -334,7 +394,7 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
             online = scanner.devices.values.count { it.online }
         }
         val o = JSONObject()
-        o.put("ok", true); o.put("mode", "observer"); o.put("iface", "wifi"); o.put("ver", "2.57"); o.put("vercode", 68)
+        o.put("ok", true); o.put("mode", "observer"); o.put("iface", "wifi"); o.put("ver", "2.58"); o.put("vercode", 69)
         o.put("subnet", scanner.subnet); o.put("ip", phoneIp)
         o.put("uptime", System.currentTimeMillis() / 1000 - scanner.startTs)
         o.put("online", online); o.put("devices", total)
