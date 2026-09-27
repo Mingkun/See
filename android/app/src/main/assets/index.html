@@ -361,7 +361,7 @@ function loadDevices(){
       day += (v.today.up||0)+(v.today.down||0);
       html+='<tr class="dev" data-ip="'+esc(v.ip)+'">'
         +'<td><span class="dot'+(v.online?' on':'')+'"></span></td>'
-        +'<td><div class="name">'+esc(v.hostname||v.type||v.ip)+'</div><div class="sub">'+esc([v.ip, v.hostname?(v.type||''):'', v.mac].filter(Boolean).join(' · '))+'</div></td>'
+        +'<td><div class="name" title="'+escA(v.hostname||v.type||v.ip)+'">'+esc(cutName(v.hostname||v.type||v.ip, 10))+'</div><div class="sub">'+esc([v.ip, v.hostname?(v.type||''):'', v.mac].filter(Boolean).join(' · '))+'</div></td>'
         +'<td class="sub">'+esc(v.vendor||'')+'</td>'
         +'<td class="num dn">'+fmtSpeed(v.speed.down)+'</td>'
         +'<td class="num up">'+fmtSpeed(v.speed.up)+'</td>'
