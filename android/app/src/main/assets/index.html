@@ -5,53 +5,150 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>see · 局域网监控</title>
 <style>
-  :root { --line:#e3e8ef; --text:#1f2630; --muted:#69737f; --brand:#2563eb; --bg:#f2f5f9; }
+  /* ===== 设计系统：字号 5 级 + 间距/圆角统一 ===== */
+  :root{
+    --fs-xs:10px;    /* 角标、代码 */
+    --fs-sm:11px;    /* 辅助说明 */
+    --fs-md:12px;    /* 控件、次级正文 */
+    --fs-base:13px;  /* 正文 */
+    --fs-lg:15px;    /* 标题 */
+    --fs-xl:18px;    /* 页面标题、大数值 */
+    --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px;
+    --pad-x:14px;    /* 统一的水平内边距 */
+    --r-1:8px; --r-2:12px; --r-3:16px;
+    --line:#e3e8ef; --line-2:#f2f5f9; --text:#1f2630; --muted:#69737f;
+    --brand:#2563eb; --warn:#d97706; --ok:#16a34a; --danger:#b02a37; --bg:#f2f5f9;
+  }
   * { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
-  body { font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; background:var(--bg); color:var(--text); }
-  .wrap { max-width:860px; margin:0 auto; padding:12px 14px 70px; }
-  header { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
-  header h1 { font-size:17px; }
-  .mode { font-size:11px; padding:2px 9px; border-radius:10px; background:#e0e7ff; color:#3730a3; }
+  body { font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+         font-size:var(--fs-base); line-height:1.55; background:var(--bg); color:var(--text); }
+  .wrap { max-width:860px; margin:0 auto; padding:var(--sp-3) var(--pad-x) 72px; }
+
+  /* 顶部 */
+  header { display:flex; align-items:center; justify-content:space-between; gap:var(--sp-2); margin-bottom:var(--sp-3); }
+  header h1 { font-size:var(--fs-lg); font-weight:650; letter-spacing:.2px; }
+  .mode { font-size:var(--fs-sm); font-weight:500; padding:3px 10px; border-radius:999px; background:#e0e7ff; color:#3730a3; }
   .mode.gw { background:#dcfce7; color:#166534; }
-  .cards { display:flex; gap:8px; margin-bottom:12px; }
-  .card { flex:1; background:#fff; border:1px solid var(--line); border-radius:12px; padding:10px 12px; }
-  .card .k { font-size:11px; color:var(--muted); }
-  .card .v { font-size:16px; font-weight:600; margin-top:3px; font-variant-numeric:tabular-nums; }
-  .panel { background:#fff; border:1px solid var(--line); border-radius:12px; margin-bottom:12px; overflow:hidden; }
-  .panel .pt { font-size:13px; font-weight:600; padding:10px 14px 8px; color:var(--muted); }
-  table { width:100%; border-collapse:collapse; font-size:13px; }
-  th { text-align:left; font-size:11px; color:var(--muted); font-weight:500; padding:4px 8px; border-bottom:1px solid var(--line); }
-  td { padding:9px 8px; border-bottom:1px solid #f0f3f7; vertical-align:middle; }
+  .iconbtn { border:none; background:none; font-size:18px; line-height:1; color:var(--muted); cursor:pointer; padding:2px; }
+
+  /* 卡片 */
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(148px,1fr)); gap:var(--sp-2); margin-bottom:var(--sp-3); }
+  .card { background:#fff; border:1px solid var(--line); border-radius:var(--r-2); padding:10px var(--pad-x); }
+  .card .k { font-size:var(--fs-sm); color:var(--muted); }
+  .card .v { font-size:var(--fs-xl); font-weight:650; margin-top:2px; font-variant-numeric:tabular-nums; letter-spacing:-.2px; }
+
+  /* 面板 */
+  .panel { background:#fff; border:1px solid var(--line); border-radius:var(--r-2); margin-bottom:var(--sp-3); overflow:hidden; }
+  .panel .pt { display:flex; justify-content:space-between; align-items:center; gap:var(--sp-2);
+               font-size:var(--fs-md); font-weight:650; letter-spacing:.2px; padding:11px var(--pad-x) 9px; }
+  .pbody { padding:var(--sp-3) var(--pad-x); }
+
+  /* 表格 */
+  table { width:100%; border-collapse:collapse; font-size:var(--fs-base); }
+  th { text-align:left; font-size:var(--fs-sm); font-weight:600; color:var(--muted);
+       padding:8px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  td { padding:10px 8px; border-bottom:1px solid var(--line-2); vertical-align:middle; }
+  th:first-child, td:first-child { padding-left:var(--pad-x); }
+  th:last-child, td:last-child { padding-right:var(--pad-x); }
+  tbody tr:last-child td { border-bottom:none; }
+  th.num, td.num { text-align:right; }
   tr.dev { cursor:pointer; }
   tr.dev:active { background:#f6f8fb; }
-  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:#cbd5e1; margin-right:2px; }
+  .divider td { border-top:2px solid var(--line); }
+  .celltight { padding-top:0; padding-bottom:10px; }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:#cbd5e1; }
   .dot.on { background:#22c55e; box-shadow:0 0 6px #22c55e; }
   .name { font-weight:600; }
-  .sub { font-size:11px; color:var(--muted); }
   .num { font-variant-numeric:tabular-nums; white-space:nowrap; }
-  .dn { color:#2563eb; } .up { color:#d97706; }
-  .ev { display:flex; gap:10px; padding:8px 14px; border-bottom:1px solid #f0f3f7; font-size:12px; }
+  .dn { color:var(--brand); } .up { color:var(--warn); }
+
+  /* 文字 */
+  .sub { font-size:var(--fs-sm); color:var(--muted); }
+  .fs-xs { font-size:var(--fs-xs); }
+  .sub-inline { font-size:var(--fs-sm); font-weight:400; color:var(--muted); margin-left:var(--sp-2); }
+  .hint { display:block; font-size:var(--fs-sm); line-height:1.5; color:var(--muted); padding:10px var(--pad-x); }
+  .center-note { display:block; text-align:center; font-size:var(--fs-sm); color:var(--muted); padding:10px var(--pad-x); }
+  .sec { font-size:var(--fs-sm); font-weight:700; letter-spacing:.4px; color:var(--muted); margin:var(--sp-4) 0 var(--sp-2); }
+  .sec:first-child { margin-top:0; }
+  .h2 { font-size:var(--fs-lg); font-weight:650; }
+  .link { display:inline-block; margin-top:var(--sp-1); font-size:var(--fs-md); color:var(--brand); }
+  .c-brand { color:var(--brand); } .c-warn { color:var(--warn); } .c-ok { color:var(--ok); }
+  .c-danger { color:var(--danger); } .c-muted { color:var(--muted); }
+
+  /* 控件 */
+  .btn { font-family:inherit; font-size:var(--fs-md); font-weight:500; line-height:1; white-space:nowrap;
+         padding:8px 14px; border:1px solid #cbd5e1; background:#fff; color:var(--brand);
+         border-radius:var(--r-1); cursor:pointer; }
+  .btn:active { background:#f6f8fb; }
+  .btn.primary { background:var(--brand); border-color:var(--brand); color:#fff; }
+  .btn.danger { color:var(--danger); }
+  .btn.ghost { color:var(--text); }
+  .btn.sm { padding:5px 10px; font-size:var(--fs-sm); }
+  .inp, .sel { font-family:inherit; font-size:var(--fs-md); color:var(--text); background:#fff;
+               border:1px solid #cbd5e1; border-radius:var(--r-1); padding:7px 10px; min-width:0; }
+  .inp.sm, .sel.sm { padding:5px 8px; font-size:var(--fs-sm); }
+  .w88 { width:88px; } .w90 { width:90px; } .w110 { width:110px; }
+  .grow { flex:1; min-width:0; }
+
+  /* 布局工具 */
+  .row { display:flex; gap:var(--sp-2); align-items:center; flex-wrap:wrap; }
+  .hrow { display:flex; gap:10px; align-items:center; }
+  .flexbetween { display:flex; justify-content:space-between; align-items:center; gap:var(--sp-2); }
+  .rowline { display:flex; gap:6px; align-items:center; flex-wrap:wrap; padding:8px 0; border-bottom:1px solid var(--line-2); }
+  .rowpad { padding:2px 0; }
+  .mt-1 { margin-top:var(--sp-1); } .mt-2 { margin-top:var(--sp-2); } .mt-3 { margin-top:10px; }
+  .ml-1 { margin-left:var(--sp-1); }
+  .scrollx { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+  .thumb { width:40px; height:40px; object-fit:cover; border-radius:var(--r-1); border:1px solid var(--line); }
+  .code { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:var(--fs-xs); color:#5a6472;
+          word-break:break-all; max-height:200px; overflow:auto; background:#f6f8fb;
+          border-radius:var(--r-1); padding:8px; }
+  .tag { display:inline-block; font-size:var(--fs-xs); line-height:1.6; padding:0 6px; border-radius:6px; margin-right:5px; }
+  .tag.join { background:#dcfce7; color:#166534; } .tag.offline { background:#fee2e2; color:#991b1b; }
+  .tag.online { background:#dbeafe; color:#1e40af; }
+
+  /* 事件流 */
+  .ev { display:flex; gap:10px; align-items:baseline; padding:10px var(--pad-x); border-bottom:1px solid var(--line-2); font-size:var(--fs-md); }
+  .ev:last-child { border-bottom:none; }
   .ev .t { color:var(--muted); white-space:nowrap; font-variant-numeric:tabular-nums; }
-  .tag { display:inline-block; font-size:10px; padding:0 6px; border-radius:6px; margin-right:4px; }
-  .tag.join { background:#dcfce7; color:#166534; } .tag.offline { background:#fee2e2; color:#991b1b; } .tag.online { background:#dbeafe; color:#1e40af; }
-  .bar { background:#eff3f8; border-radius:4px; height:8px; overflow:hidden; margin-top:3px; }
-  .bar > i { display:block; height:100%; background:var(--brand); }
-  #detail { position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:100; display:none; align-items:center; justify-content:center; }
-  #detail .box { width:min(520px,calc(100vw - 32px)); max-height:84vh; overflow:auto; background:#fff; border-radius:14px; padding:16px; }
+
+  /* 图表 */
+  .chart-svg { width:100%; height:200px; display:block; background:#fbfcfe; border:1px solid #eef1f6; border-radius:var(--r-2); }
+  .legend { padding:6px var(--pad-x) 0; font-size:var(--fs-sm); color:var(--muted); }
   .chart { display:flex; align-items:flex-end; gap:1px; height:70px; margin:8px 0 2px; }
   .chart .b { flex:1; background:#bfdbfe; border-radius:1px 1px 0 0; position:relative; }
   .chart .b i { position:absolute; left:0; right:0; bottom:0; background:#2563eb; border-radius:1px 1px 0 0; }
-  .approw { display:flex; align-items:center; gap:8px; padding:6px 0; font-size:12px; }
+  .bar { background:#eff3f8; border-radius:4px; height:8px; overflow:hidden; margin-top:3px; }
+  .bar > i { display:block; height:100%; background:var(--brand); }
+
+  /* 应用排行 */
+  .approw { display:flex; align-items:center; gap:var(--sp-2); padding:7px 0; font-size:var(--fs-md); }
   .approw .an { width:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:500; }
   .approw .ab { flex:1; } .approw .av { width:90px; text-align:right; color:var(--muted); font-variant-numeric:tabular-nums; }
-  .hint { font-size:11px; color:var(--muted); padding:8px 14px; }
+
+  /* 弹窗 */
+  .modal { position:fixed; inset:0; z-index:110; background:rgba(15,23,42,.45); display:none;
+           align-items:center; justify-content:center; padding:var(--sp-4); }
+  .mbox { width:min(420px,100%); max-height:84vh; overflow:auto; background:#fff;
+          border-radius:var(--r-3); padding:var(--sp-4); }
+  .mbox.wide { width:min(520px,100%); }
+  .mhead { display:flex; justify-content:space-between; align-items:center; gap:var(--sp-2); margin-bottom:var(--sp-2); }
+  .xbtn { border:none; background:none; font-size:22px; line-height:1; color:var(--muted); cursor:pointer; padding:0 2px; }
+
+  /* 底部导航 */
+  .tabbar { position:fixed; left:0; right:0; bottom:0; z-index:50; display:flex;
+            background:#fff; border-top:1px solid var(--line); padding-bottom:env(safe-area-inset-bottom); }
+  .tab { flex:1; border:none; background:none; cursor:pointer; font-family:inherit;
+         padding:7px 0 9px; font-size:var(--fs-sm); line-height:1.2; color:var(--muted); }
+  .tab .sym { display:block; font-size:18px; line-height:1.25; }
+  .tab.on { color:var(--brand); }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
     <h1>📡 see · 局域网监控</h1>
-    <div style="display:flex;align-items:center;gap:10px"><span class="mode" id="mode">…</span><button id="sysBtn" onclick="openSys()" style="border:none;background:none;font-size:17px;cursor:pointer;color:#69737f;padding:2px 2px;line-height:1">⚙</button></div>
+    <div class="hrow"><span class="mode" id="mode">…</span><button id="sysBtn" onclick="openSys()" class="iconbtn">⚙</button></div>
   </header>
   <div id="viewMon">
   <div class="cards">
@@ -61,8 +158,8 @@
     <div class="card"><div class="k">今日总流量</div><div class="v" id="cDay">–</div></div>
   </div>
   <div class="panel" id="gwPanel" style="display:none">
-    <div class="pt" style="display:flex;justify-content:space-between;align-items:center"><span>网关设备（实时）</span><span class="sub" id="gwSum" style="font-size:11px"></span></div>
-    <div style="overflow-x:auto">
+    <div class="pt"><span>网关设备（实时）</span><span class="sub" id="gwSum"></span></div>
+    <div class="scrollx">
       <table>
         <thead><tr><th></th><th>设备</th><th>品牌</th><th>↓ 速度</th><th>↑ 速度</th><th>在线</th></tr></thead>
         <tbody id="gwBody"><tr><td colspan="6" class="hint">加载中…</td></tr></tbody>
@@ -73,8 +170,8 @@
   </div>
   <div id="viewObs" style="display:none">
   <div class="panel">
-    <div class="pt" style="display:flex;justify-content:space-between;align-items:center"><span>设备</span><button id="scanBtn" onclick="doScan()" style="font-size:11px;border:1px solid #cdd6e0;background:#fff;border-radius:8px;padding:3px 10px;color:#2563eb">🔄 立即扫描</button></div>
-    <div style="overflow-x:auto">
+    <div class="pt"><span>设备</span><button id="scanBtn" onclick="doScan()" class="btn sm">🔄 立即扫描</button></div>
+    <div class="scrollx">
     <table>
       <thead><tr><th></th><th>设备</th><th>厂商</th><th>↓ 速度</th><th>↑ 速度</th><th>今日流量</th></tr></thead>
       <tbody id="devBody"><tr><td colspan="6" class="hint">加载中…</td></tr></tbody>
@@ -84,17 +181,17 @@
   </div>
   <div class="panel">
     <div class="pt">动态</div>
-    <div style="text-align:center;padding:10px" class="sub" id="obsNote">–</div><div id="evBody"><div class="hint">加载中…</div></div>
+    <div  class="sub center-note" id="obsNote">–</div><div id="evBody"><div class="hint">加载中…</div></div>
   </div>
   </div>
   <div id="viewSpeed" style="display:none">
   <div class="panel" id="snapPanel">
     <div class="pt">📸 截图测速</div>
-    <div style="padding:10px 14px">
-      <div class="hint" style="padding:0 0 8px;display:block">选两张或以上截图（手机流量页/路由器统计页，含累计上传/下载量），自动识别并按时间差算出进/出网速。识别需联网。</div>
-      <input type="file" id="snapFiles" accept="image/*" multiple style="font-size:12px">
+    <div class="pbody">
+      <div class="hint hint">选两张或以上截图（手机流量页/路由器统计页，含累计上传/下载量），自动识别并按时间差算出进/出网速。识别需联网。</div>
+      <input type="file" id="snapFiles" accept="image/*" multiple>
       <div id="snapRows"></div>
-      <button type="button" onclick="snapCalc()" style="margin-top:8px;border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 14px;color:#2563eb;cursor:pointer">计算网速<button type="button" onclick="snapClear()" style="margin-top:8px;margin-left:8px;border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 14px;color:#b02a37;cursor:pointer">🗑 清空</button>
+      <div class="row mt-2"><button type="button" onclick="snapCalc()" class="btn">计算网速</button><button type="button" onclick="snapClear()" class="btn danger">🗑 清空</button></div>
       <div id="snapOut"></div>
     </div>
   </div>
@@ -102,23 +199,23 @@
 
 <div id="viewAn" style="display:none">
   <div class="panel">
-    <div class="pt" style="display:flex;justify-content:space-between;align-items:center"><span>📈 流量负载分析</span><span class="sub" style="font-size:11px" id="anSub"></span></div>
-    <div style="padding:10px 14px 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-      <select id="anDev" onchange="anLoad()" style="flex:1;min-width:170px;font-size:12px;border:1px solid var(--line);border-radius:8px;padding:5px 6px;background:#fff"></select>
-      <select id="anWin" onchange="anLoad()" style="font-size:12px;border:1px solid var(--line);border-radius:8px;padding:5px 6px;background:#fff">
+    <div class="pt"><span>📈 流量负载分析</span><span class="sub" id="anSub"></span></div>
+    <div class="pbody row">
+      <select id="anDev" onchange="anLoad()" class="sel grow"></select>
+      <select id="anWin" onchange="anLoad()" class="sel">
         <option value="24">近 24 小时</option>
         <option value="12">近 12 小时</option>
         <option value="6">近 6 小时</option>
       </select>
-      <button type="button" onclick="anLoad()" style="border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 12px;color:#2563eb;cursor:pointer">刷新</button>
+      <button type="button" onclick="anLoad()" class="btn">刷新</button>
     </div>
-    <div style="padding:8px 10px 0"><svg id="anChart" style="width:100%;height:190px;display:block;background:#fbfcfe;border:1px solid #eef1f6;border-radius:10px"></svg></div>
-    <div style="padding:4px 14px 0" class="sub">横轴 0–24 时 · 纵轴为下行+上行速率（对数显示）；<span style="color:#b9c0ca">▬</span> 无数据 · <span style="color:#cfe0ff">▬</span> 休眠/离线 · <span style="color:#2563eb">▬</span> 有流量</div>
-    <div id="anLegend" style="padding:6px 14px 0" class="sub"></div>
+    <div class="pbody mt-1"><svg id="anChart" class="chart-svg"></svg></div>
+    <div  class="sub legend">横轴 0–24 时 · 纵轴为下行+上行速率（对数显示）；<span class="c-muted">▬</span> 无数据 · <span class="c-muted">▬</span> 休眠/离线 · <span class="c-brand">▬</span> 有流量</div>
+    <div id="anLegend"  class="sub legend"></div>
   </div>
   <div class="panel" id="anSleepPanel" style="display:none">
-    <div class="pt">😴 休眠 / 空闲时段<span class="sub" style="font-weight:400;font-size:11px;margin-left:6px">（连续 ≥10 分钟无流量或离线）</span></div>
-    <div style="overflow-x:auto">
+    <div class="pt">😴 休眠 / 空闲时段<span class="sub sub-inline">（连续 ≥10 分钟无流量或离线）</span></div>
+    <div class="scrollx">
       <table>
         <thead><tr><th>时段</th><th>时长</th><th>类型</th><th>期间峰值</th></tr></thead>
         <tbody id="anSleepBody"><tr><td colspan="4" class="hint">—</td></tr></tbody>
@@ -127,7 +224,7 @@
   </div>
   <div class="panel">
     <div class="pt">📊 分时用量（1 小时一格）</div>
-    <div style="overflow-x:auto">
+    <div class="scrollx">
       <table>
         <thead><tr><th>小时</th><th>平均速率</th><th>峰值</th><th>状态</th></tr></thead>
         <tbody id="anHourBody"><tr><td colspan="4" class="hint">—</td></tr></tbody>
@@ -137,45 +234,45 @@
   </div>
 </div>
 
-<div id="sysPanel" style="position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:110;display:none;align-items:center;justify-content:center">
-  <div style="width:min(360px,calc(100vw - 32px));max-height:80vh;overflow:auto;background:#fff;border-radius:14px;padding:16px">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><strong style="font-size:15px">系统设置</strong><button onclick="closeSys()" style="border:none;background:none;font-size:22px;cursor:pointer;color:#69737f;line-height:1">×</button></div>
+<div id="sysPanel" class="modal" style="display:none">
+  <div class="mbox">
+    <div class="mhead"><strong class="h2">系统设置</strong><button onclick="closeSys()" class="xbtn">×</button></div>
     <div class="sub" id="sysInfo">–</div>
-    <div style="font-size:12px;font-weight:600;color:#69737f;margin-top:14px">版本与更新</div>
+    <div class="sec">版本与更新</div>
     <div class="sub" id="sysVer">–</div>
-    <button id="updBtn" onclick="checkUpdate()" style="margin-top:6px;border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 14px;color:#2563eb;cursor:pointer">🔄 检查更新</button>
-    <div id="updOut" class="sub" style="margin-top:6px"></div>
-    <div style="font-size:12px;font-weight:600;color:#69737f;margin-top:14px">网关对接（实验）</div>
-    <div style="display:flex;gap:6px;align-items:center;margin-top:4px">
-      <input id="gwIp" value="192.168.1.1" style="width:110px;font-size:12px;border:1px solid var(--line);border-radius:6px;padding:4px 6px">
-      <button type="button" onclick="gwProbe()" style="border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 12px;color:#2563eb;cursor:pointer">🔍 探测接口</button>
+    <button id="updBtn" onclick="checkUpdate()" class="btn mt-2">🔄 检查更新</button>
+    <div id="updOut" class="sub mt-2"></div>
+    <div class="sec">网关对接（实验）</div>
+    <div class="row mt-1">
+      <input id="gwIp" value="192.168.1.1" class="inp w110">
+      <button type="button" onclick="gwProbe()" class="btn">🔍 探测接口</button>
     </div>
-    <div style="display:flex;gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap">
-      <input id="gwUser" placeholder="账号" value="useradmin" style="width:90px;font-size:12px;border:1px solid var(--line);border-radius:6px;padding:4px 6px">
-      <input id="gwPass" placeholder="密码" type="password" style="width:110px;font-size:12px;border:1px solid var(--line);border-radius:6px;padding:4px 6px">
-      <button type="button" onclick="gwEnum()" style="border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 12px;color:#2563eb;cursor:pointer">🔑 登录枚举</button>
-      <button type="button" onclick="gwStart()" style="border:1px solid #2563eb;background:#2563eb;border-radius:8px;font-size:12px;padding:5px 12px;color:#fff;cursor:pointer">📶 开启实时设备</button>
-      <button type="button" onclick="gwStop()" style="border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 12px;color:#69737f;cursor:pointer">⏹ 停止</button>
-      <button type="button" onclick="gwSave()" style="border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 12px;color:#2563eb;cursor:pointer">💾 保存配置</button>
-      <button type="button" onclick="gwRemote()" style="border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 12px;color:#2563eb;cursor:pointer">🌐 远程探测</button>
+    <div class="row mt-2">
+      <input id="gwUser" placeholder="账号" value="useradmin" class="inp w90">
+      <input id="gwPass" placeholder="密码" type="password" class="inp w110">
+      <button type="button" onclick="gwEnum()" class="btn">🔑 登录枚举</button>
+      <button type="button" onclick="gwStart()" class="btn primary">📶 开启实时设备</button>
+      <button type="button" onclick="gwStop()" class="btn ghost">⏹ 停止</button>
+      <button type="button" onclick="gwSave()" class="btn">💾 保存配置</button>
+      <button type="button" onclick="gwRemote()" class="btn">🌐 远程探测</button>
     </div>
-    <div id="gwOut" class="sub" style="margin-top:6px"></div>
-    <div style="font-size:12px;font-weight:600;color:#69737f;margin-top:14px">后台保活</div>
-    <div class="sub" style="margin-top:2px">开启实时设备后，本机前台服务会持续采集并上传服务器（关掉界面也继续）；开机后会自动恢复。</div>
-    <div style="display:flex;gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap">
-      <button type="button" onclick="battery()" style="border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 12px;color:#2563eb;cursor:pointer">🔋 电池白名单</button>
-      <button type="button" onclick="appSettings()" style="border:1px solid #c7d0dc;background:#fff;border-radius:8px;font-size:12px;padding:5px 12px;color:#2563eb;cursor:pointer">⚙ 系统设置（自启动）</button>
+    <div id="gwOut" class="sub mt-2"></div>
+    <div class="sec">后台保活</div>
+    <div class="sub ml-0 mt-1">开启实时设备后，本机前台服务会持续采集并上传服务器（关掉界面也继续）；开机后会自动恢复。</div>
+    <div class="row mt-2">
+      <button type="button" onclick="battery()" class="btn">🔋 电池白名单</button>
+      <button type="button" onclick="appSettings()" class="btn">⚙ 系统设置（自启动）</button>
     </div>
-    <div style="font-size:12px;font-weight:600;color:#69737f;margin-top:14px">客户端下载</div>
-    <a href="https://5130599.best/see/downloads/see-android.apk" style="font-size:12px;color:#2563eb;display:inline-block;margin-top:4px">⬇ 最新版 APK（浏览器打开）</a>
+    <div class="sec">客户端下载</div>
+    <a href="https://5130599.best/see/downloads/see-android.apk" class="link">⬇ 最新版 APK（浏览器打开）</a>
   </div>
 </div>
   </div>
-<div style="position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--line);display:flex;z-index:50;padding-bottom:env(safe-area-inset-bottom)">
-  <button id="tabMon" type="button" onclick="seeTab('mon')" style="flex:1;border:none;background:none;padding:7px 0 9px;font-size:12px;cursor:pointer;color:#2563eb"><span style="font-size:17px;display:block;line-height:1.3">📊</span>监控</button>
-  <button id="tabObs" type="button" onclick="seeTab('obs')" style="flex:1;border:none;background:none;padding:7px 0 9px;font-size:12px;cursor:pointer;color:#69737f"><span style="font-size:17px;display:block;line-height:1.3">👁</span>观察</button>
-  <button id="tabAn" type="button" onclick="seeTab('an')" style="flex:1;border:none;background:none;padding:7px 0 9px;font-size:12px;cursor:pointer;color:#69737f"><span style="font-size:17px;display:block;line-height:1.3">📈</span>分析</button>
-  <button id="tabSpd" type="button" onclick="seeTab('spd')" style="flex:1;border:none;background:none;padding:7px 0 9px;font-size:12px;cursor:pointer;color:#69737f"><span style="font-size:17px;display:block;line-height:1.3">📸</span>测速</button>
+<div class="tabbar">
+  <button id="tabMon" type="button" onclick="seeTab('mon')" class="tab on"><span class="sym">📊</span>监控</button>
+  <button id="tabObs" type="button" onclick="seeTab('obs')" class="tab"><span class="sym">👁</span>观察</button>
+  <button id="tabAn" type="button" onclick="seeTab('an')" class="tab"><span class="sym">📈</span>分析</button>
+  <button id="tabSpd" type="button" onclick="seeTab('spd')" class="tab"><span class="sym">📸</span>测速</button>
 </div>
 <script>
 function seeTab(w){
@@ -193,14 +290,14 @@ function seeTab(w){
 </script>
 <div id="detail">
   <div class="box">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-      <strong id="dTitle" style="font-size:15px">设备</strong>
-      <button onclick="closeDetail()" style="border:none;background:none;font-size:22px;cursor:pointer;color:#69737f;line-height:1">×</button>
+    <div class="mhead">
+      <strong id="dTitle" class="h2">设备</strong>
+      <button onclick="closeDetail()" class="xbtn">×</button>
     </div>
     <div class="sub" id="dInfo"></div>
-    <div style="font-size:12px;font-weight:600;color:var(--muted);margin-top:12px">近 90 分钟流量（下/上）</div>
+    <div class="sec">近 90 分钟流量（下/上）</div>
     <div class="chart" id="dChart"></div>
-    <div style="font-size:12px;font-weight:600;color:var(--muted);margin-top:10px">应用/目标（近 5 分钟）</div>
+    <div class="sec">应用/目标（近 5 分钟）</div>
     <div id="dApps" class="hint">–</div>
   </div>
 </div>
@@ -277,7 +374,7 @@ function loadDetail(){
     document.getElementById('dTitle').textContent=v.hostname||v.ip;
     document.getElementById('dInfo').textContent=(v.type?v.type+' · ':'')+v.ip+' · '+v.mac+(v.vendor?' · '+v.vendor:'')+(v.online?' · 在线':' · 离线')+' · 今日 ↓'+fmtBytes(d.today.down)+' ↑'+fmtBytes(d.today.up);
     var ch=document.getElementById('dChart'), s=d.series||[], n=s.length;
-    if(!n){ ch.innerHTML='<div class="hint" style="flex:1">暂无数据（需网关模式）</div>'; }
+    if(!n){ ch.innerHTML='<div class="hint grow">暂无数据（需网关模式）</div>'; }
     else{
       var max=1; s.forEach(function(x){ max=Math.max(max,x.down,x.up); });
       var html='';
@@ -340,9 +437,9 @@ function gwProbe(){
       if (!d || !d.ok) { o.textContent = '探测失败: ' + ((d && d.error) || ''); return; }
       var html = '';
       (d.results || []).forEach(function(x){
-        html += '<div style="padding:2px 0"><b>' + esc(x.path) + '</b> → ' + (x.status < 0 ? '❌ ' + esc(x.err || '') : x.status + ' (' + (x.len || 0) + 'B)') + '</div>';
+        html += '<div class="rowpad"><b>' + esc(x.path) + '</b> → ' + (x.status < 0 ? '❌ ' + esc(x.err || '') : x.status + ' (' + (x.len || 0) + 'B)') + '</div>';
       });
-      o.innerHTML = html + '<div style="color:#69737f">结果已回传服务器分析</div>';
+      o.innerHTML = html + '<div class="c-muted">结果已回传服务器分析</div>';
       try {
         fetch('https://5130599.best/see/api/gw/report', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ip: ip, ver: 'probe', results: d.results }) }).catch(function(){});
       } catch (e) {}
@@ -381,10 +478,10 @@ function gwEnum(){
   }).then(function(){
     var html = '';
     steps.forEach(function(x){
-      html += '<div style="padding:2px 0"><b>' + esc(x.path || '') + '</b> → ' + (x.status < 0 ? '❌ ' + esc(x.err || '') : x.status) + '</div>'
-        + '<div style="font-family:monospace;font-size:10px;color:#5a6472;word-break:break-all;max-height:200px;overflow:auto;background:#f6f8fb;border-radius:6px;padding:6px">' + esc((x.snippet || '').substring(0, 1500)) + '</div>';
+      html += '<div class="rowpad"><b>' + esc(x.path || '') + '</b> → ' + (x.status < 0 ? '❌ ' + esc(x.err || '') : x.status) + '</div>'
+        + '<div class="code">' + esc((x.snippet || '').substring(0, 1500)) + '</div>';
     });
-    o.innerHTML = html + '<div style="color:#69737f">扫描完成' + (token ? '（登录成功）' : '') + '，结果已回传</div>';
+    o.innerHTML = html + '<div class="c-muted">扫描完成' + (token ? '（登录成功）' : '') + '，结果已回传</div>';
     try {
       fetch('https://5130599.best/see/api/gw/report', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ip: ip, ver:'enum3', user:user, has_token: !!token, results: steps }) }).catch(function(){});
     } catch(e) {}
@@ -441,9 +538,9 @@ function gwRemote(){
     .then(function(){
       var html = '';
       steps.forEach(function(x){
-        html += '<div style="padding:2px 0"><b>' + esc(x.name || '') + '</b> → ' + (x.status < 0 ? '❌ ' + esc(x.err || '') : x.status) + ' (' + (x.len || 0) + 'B)</div>';
+        html += '<div class="rowpad"><b>' + esc(x.name || '') + '</b> → ' + (x.status < 0 ? '❌ ' + esc(x.err || '') : x.status) + ' (' + (x.len || 0) + 'B)</div>';
       });
-      o.innerHTML = html + '<div style="color:#69737f">结果已回传服务器</div>';
+      o.innerHTML = html + '<div class="c-muted">结果已回传服务器</div>';
       try {
         fetch('https://5130599.best/see/api/gw/report', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ip: ip, ver:'plan', user: uv, results: steps }) }).catch(function(){});
       } catch(e) {}
@@ -500,12 +597,12 @@ function snapRender(){
   snapItems.sort(function(a,b){ return a.ts-b.ts; });
   var html='';
   snapItems.forEach(function(it,i){
-    html+='<div style="display:flex;gap:5px;align-items:center;padding:7px 0;border-bottom:1px solid #f0f3f7;flex-wrap:wrap">'
-      +'<img src="'+it.url+'" style="width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid #e3e8ef">'
-      +'<input type="datetime-local" step="1" value="'+snapFmtDT(it.ts)+'" onchange="snapItems['+i+'].ts=new Date(this.value).getTime()" style="flex:1;min-width:150px;font-size:11px;border:1px solid var(--line);border-radius:6px;padding:3px 5px">'
-      +'<span class="sub">↑</span><input type="text" placeholder="如1.03GB" value="'+snapAttr(it.upText||(it.up!=null?(it.up/1048576).toFixed(2)+'MB':''))+'" onchange="snapItems['+i+'].upText=this.value;snapItems['+i+'].up=snapParseBytes(this.value)" style="width:88px;font-size:11px;border:1px solid var(--line);border-radius:6px;padding:3px 5px">'
-      +'<span class="sub">↓</span><input type="text" placeholder="如14.22GB" value="'+snapAttr(it.downText||(it.down!=null?(it.down/1048576).toFixed(2)+'MB':''))+'" onchange="snapItems['+i+'].downText=this.value;snapItems['+i+'].down=snapParseBytes(this.value)" style="width:88px;font-size:11px;border:1px solid var(--line);border-radius:6px;padding:3px 5px">'
-      +(it.busy?'<span class="sub" style="color:#d97706">识别中…</span>':(it.err?'<span class="sub" style="color:#b02a37">'+esc(it.err)+'</span>':''))
+    html+='<div class="rowline">'
+      +'<img src="'+it.url+'" class="thumb">'
+      +'<input type="datetime-local" step="1" value="'+snapFmtDT(it.ts)+'" onchange="snapItems['+i+'].ts=new Date(this.value).getTime()" class="inp sm grow">'
+      +'<span class="sub">↑</span><input type="text" placeholder="如1.03GB" value="'+snapAttr(it.upText||(it.up!=null?(it.up/1048576).toFixed(2)+'MB':''))+'" onchange="snapItems['+i+'].upText=this.value;snapItems['+i+'].up=snapParseBytes(this.value)" class="inp sm w88">'
+      +'<span class="sub">↓</span><input type="text" placeholder="如14.22GB" value="'+snapAttr(it.downText||(it.down!=null?(it.down/1048576).toFixed(2)+'MB':''))+'" onchange="snapItems['+i+'].downText=this.value;snapItems['+i+'].down=snapParseBytes(this.value)" class="inp sm w88">'
+      +(it.busy?'<span class="sub c-warn">识别中…</span>':(it.err?'<span class="sub c-danger">'+esc(it.err)+'</span>':''))
       +'</div>';
   });
   document.getElementById('snapRows').innerHTML = html;
@@ -521,27 +618,27 @@ function snapCalc(){
   var o = document.getElementById('snapOut');
   var its = snapItems.filter(function(x){ return x.ts && x.up!=null && !isNaN(x.up) && x.down!=null && !isNaN(x.down); });
   its.sort(function(a,b){ return a.ts-b.ts; });
-  if (its.length < 2){ o.innerHTML = '<div class="hint" style="padding:8px 0 0;display:block">需要至少两张已识别出 ↑↓ 数值的截图</div>'; return; }
-  var html = '<table style="margin-top:10px"><thead><tr><th>区间</th><th>时长</th><th>↑ 上传速度</th><th>↓ 下载速度</th></tr></thead><tbody>';
+  if (its.length < 2){ o.innerHTML = '<div class="hint hint">需要至少两张已识别出 ↑↓ 数值的截图</div>'; return; }
+  var html = '<table class="mt-3"><thead><tr><th>区间</th><th>时长</th><th>↑ 上传速度</th><th>↓ 下载速度</th></tr></thead><tbody>';
   for (var i=1;i<its.length;i++){
     var a=its[i-1], b=its[i], dt=(b.ts-a.ts)/1000;
     if (dt <= 0) continue;
     var du=b.up-a.up, dd=b.down-a.down;
     var note='';
-    if (du<0||dd<0) note=' <span class="sub" style="color:#b02a37">(计数器清零?)</span>';
+    if (du<0||dd<0) note=' <span class="sub c-danger">(计数器清零?)</span>';
     html+='<tr><td class="sub">'+snapPad2(new Date(a.ts).getHours())+':'+snapPad2(new Date(a.ts).getMinutes())+' → '+snapPad2(new Date(b.ts).getHours())+':'+snapPad2(new Date(b.ts).getMinutes())+'</td>'
       +'<td class="num">'+(dt>=60?(dt/60).toFixed(1)+'分':Math.round(dt)+'秒')+'</td>'
       +'<td class="num up">'+(du<0?'-':fmtSpeed(du/dt))+'</td>'
       +'<td class="num dn">'+(dd<0?'-':fmtSpeed(dd/dt))+'</td>'+note+'</tr>'
-      +((du>=0&&dd>=0&&dt>0)?'<tr><td colspan="4" class="sub" style="padding-top:0;padding-bottom:8px">💭 '+snapGuess(du/dt, dd/dt)+'</td></tr>':'');
+      +((du>=0&&dd>=0&&dt>0)?'<tr><td colspan="4" class="sub celltight">💭 '+snapGuess(du/dt, dd/dt)+'</td></tr>':'');
   }
   var a0=its[0], b0=its[its.length-1], dtt=(b0.ts-a0.ts)/1000;
   if (dtt>0){
-    html+='<tr style="border-top:2px solid var(--line)"><td><b>整体平均</b></td><td class="num">'+(dtt>=60?(dtt/60).toFixed(1)+'分':Math.round(dtt)+'秒')+'</td>'
+    html+='<tr class="divider"><td><b>整体平均</b></td><td class="num">'+(dtt>=60?(dtt/60).toFixed(1)+'分':Math.round(dtt)+'秒')+'</td>'
       +'<td class="num up"><b>'+fmtSpeed((b0.up-a0.up)/dtt)+'</b></td><td class="num dn"><b>'+fmtSpeed((b0.down-a0.down)/dtt)+'</b></td></tr>'
-      +'<tr><td colspan="4" class="sub" style="padding-top:0;padding-bottom:8px">💭 '+snapGuess((b0.up-a0.up)/dtt, (b0.down-a0.down)/dtt)+'</td></tr>';
+      +'<tr><td colspan="4" class="sub celltight">💭 '+snapGuess((b0.up-a0.up)/dtt, (b0.down-a0.down)/dtt)+'</td></tr>';
   }
-  o.innerHTML = html+'</tbody></table><div class="hint" style="padding:6px 0 0;display:block">速度=两截图累计值之差÷时间差；↑为上传(出) ↓为下载(进)</div>';
+  o.innerHTML = html+'</tbody></table><div class="hint hint">速度=两截图累计值之差÷时间差；↑为上传(出) ↓为下载(进)</div>';
 }
 var GW = { ip: '192.168.1.1', user: 'useradmin', on: false, timer: null, fails: 0 };
 GW['pa' + 'ss'] = '';
@@ -755,7 +852,7 @@ function anRender(j){
   else {
     sb.innerHTML = runs.map(function(r){
       var tip = r.type === '休眠/离线' ? '设备已从网关列表消失（断电/休眠/离开）' : '在线但几乎无流量';
-      return '<tr><td class="num">' + anHMin(from + r.a * 60) + '–' + anHMin(from + r.b * 60) + '</td><td class="num">' + anFmtDur(r.len) + '</td><td class="sub">' + r.type + '<div class="sub" style="font-size:10px">' + tip + '</div></td><td class="num">' + fmtSpeed(r.peak) + '</td></tr>';
+      return '<tr><td class="num">' + anHMin(from + r.a * 60) + '–' + anHMin(from + r.b * 60) + '</td><td class="num">' + anFmtDur(r.len) + '</td><td class="sub">' + r.type + '<div class="sub fs-xs">' + tip + '</div></td><td class="num">' + fmtSpeed(r.peak) + '</td></tr>';
     }).join('');
   }
   document.getElementById('anSleepPanel').style.display = '';
@@ -764,7 +861,7 @@ function anRender(j){
   for (var h3 = 0; h3 < nh; h3++){
     var tot = 0, mx = 0, ct2 = 0, any2 = 0, pr2 = 0;
     for (var k2 = h3 * 60; k2 < (h3 + 1) * 60; k2++){ if (hs[k2]) any2 = 1; if (pr[k2]) pr2 = 1; tot += sp[k2]; if (sp[k2] > mx) mx = sp[k2]; ct2++; }
-    var st = !any2 ? '<span class="sub">无数据</span>' : (!pr2 ? '<span style="color:#2563eb">休眠/离线</span>' : (tot / ct2 < AN_THR ? '<span style="color:#d97706">空闲</span>' : '<span style="color:#16a34a">有流量</span>'));
+    var st = !any2 ? '<span class="sub">无数据</span>' : (!pr2 ? '<span class="c-brand">休眠/离线</span>' : (tot / ct2 < AN_THR ? '<span class="c-warn">空闲</span>' : '<span class="c-ok">有流量</span>'));
     rows.push('<tr><td class="num">' + anHMin(from + h3 * 3600) + '–' + anHMin(from + (h3 + 1) * 3600) + '</td><td class="num">' + fmtSpeed(tot / ct2) + '</td><td class="num">' + fmtSpeed(mx) + '</td><td>' + st + '</td></tr>');
   }
   hb.innerHTML = rows.join('');
