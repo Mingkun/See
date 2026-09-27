@@ -240,6 +240,9 @@ def _cors(resp):
 
 CFG_PATH = os.path.join(ROOT, 'data', 'gw-config.json')
 KEY_PATH = os.path.join(ROOT, 'data', 'api-key.txt')
+# 换密钥时的过渡：旧密钥放这里，只在 KEY_GRACE_HOURS 内认（到期自动作废，文件不用删）
+KEY_PREV_PATH = os.path.join(ROOT, 'data', 'api-key.prev')
+KEY_GRACE_HOURS = 72
 
 
 def _api_key():
@@ -366,10 +369,27 @@ def _client_ip():
     return (request.headers.get('X-Real-IP') or request.remote_addr or '')[:45]
 
 
+def _key_ok(k):
+    """机器密钥校验：当前密钥，或过渡期内的旧密钥（api-key.prev，按文件时间自动过期）。"""
+    if not k:
+        return False
+    if hmac.compare_digest(k, _api_key()):
+        return True
+    try:
+        age = time.time() - os.path.getmtime(KEY_PREV_PATH)
+        if age > KEY_GRACE_HOURS * 3600:
+            return False
+        with open(KEY_PREV_PATH, encoding='utf-8') as f:
+            prev = f.read().strip()
+        return bool(prev) and hmac.compare_digest(k, prev)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _auth_kind():
     """'key' = 采集器机器密钥；'sess' = 网页/App 会话令牌；None = 匿名。"""
     k = (request.headers.get('X-See-Key') or request.args.get('key') or '').strip()
-    if k and hmac.compare_digest(k, _api_key()):
+    if _key_ok(k):
         return 'key'
     tok = (request.headers.get('X-See-Session') or request.args.get('sess') or '').strip()
     if tok:
