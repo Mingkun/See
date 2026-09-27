@@ -262,6 +262,7 @@ class GwService : Service() {
     private fun record(nowSec: Long, arr: JSONArray) {
         synchronized(buf) {
             seen.clear()
+            val gwIps = HashSet<String>()
             for (i in 0 until arr.length()) {
                 val o = arr.getJSONObject(i)
                 val k = o.optString("key")
@@ -272,9 +273,12 @@ class GwService : Service() {
                 val dk = if (ip.isNotEmpty() && ip != "--") ip else k
                 seen.add(dk)
                 known[dk] = arrayOf(nm, ip)
+                // 同步给 Scanner：网关自己报在线的设备，观察页也要算在线
+                if (ip.isNotEmpty() && ip != "--") { gwIps.add(ip); GwFeed.put(ip, nm, nowSec) }
                 buf.add(arrayOf(nowSec, dk, nm, ip, 1,
                     o.optDouble("up", 0.0), o.optDouble("down", 0.0)))
             }
+            if (gwIps.isNotEmpty()) GwFeed.retain(gwIps)
             val cut = nowSec - 90000
             for ((k, v) in known) {
                 if (!seen.contains(k)) {

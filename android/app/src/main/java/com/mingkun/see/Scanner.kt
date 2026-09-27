@@ -177,6 +177,23 @@ class Scanner(private val db: Db) : Thread() {
                     addEventLocked("offline", d.ip, mac, d.hostname)
                 }
             }
+            // 网关兜底：手机侧 ping/ARP 看不到的设备（IoT 模块不回 ping、AP 隔离、
+            // 新安卓读不到 /proc/net/arp），用网关报的在网设备补上，避免「监控页有数据、观察页离线」
+            val gw = GwFeed.fresh(now, 90)
+            if (gw.isNotEmpty()) {
+                val byIp = HashMap<String, Dev>()
+                for ((_, v) in devices) if (v.ip.isNotEmpty()) byIp[v.ip] = v
+                for ((gip, gname) in gw) {
+                    val d = byIp[gip] ?: devices.getOrPut("ip:" + gip) {
+                        db.upsert("ip:" + gip, gip, gname, "", now)
+                        Dev(gip, gname, "", now, true, "🔗 网关确认")
+                    }
+                    if (!d.online) addEventLocked("online", gip, if (d.ip == gip && !d.vendor.isEmpty()) d.vendor else "", gname)
+                    d.online = true
+                    d.lastSeen = now
+                    if (d.hostname.isEmpty() && gname.isNotEmpty()) d.hostname = gname
+                }
+            }
         }
     }
 
