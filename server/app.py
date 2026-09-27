@@ -486,6 +486,31 @@ def api_logout():
     return jsonify(ok=True)
 
 
+@app.route('/api/pass', methods=['OPTIONS', 'POST'])
+def api_pass():
+    """改访问口令：必须已登录，且要带原口令校验。"""
+    if request.method == 'OPTIONS':
+        return _opt('POST, OPTIONS')
+    if _auth_kind() != 'sess':
+        return _deny()
+    ip = _client_ip()
+    if _login_blocked(ip):
+        return jsonify(ok=False, error='失败次数过多，请 5 分钟后再试'), 429
+    data = request.get_json(force=True, silent=True) or {}
+    cur = (data.get('cur') or '').strip()
+    new = (data.get('new') or '').strip()
+    if not _check_pass(cur):
+        _login_failed(ip)
+        return jsonify(ok=False, error='原口令不对'), 401
+    if len(new) < 6:
+        return jsonify(ok=False, error='新口令至少 6 位'), 400
+    if new == cur:
+        return jsonify(ok=False, error='新口令和原口令一样'), 400
+    LOGIN_FAIL.pop(ip, None)
+    _save_uipass(new)
+    return jsonify(ok=True)
+
+
 @app.route('/api/session/all', methods=['OPTIONS', 'POST'])
 def api_session_kill():
     """退出所有设备。"""

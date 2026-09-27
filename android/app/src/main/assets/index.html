@@ -309,6 +309,13 @@
       <button type="button" onclick="copyMc()" class="btn">📋 复制</button>
       <button type="button" onclick="doLogout()" class="btn ghost">🚪 退出登录</button>
     </div>
+    <div class="sec">修改访问口令</div>
+    <div class="sub ml-0 mt-1">改口令要先输原口令验证；改完已登录的设备保持在线。</div>
+    <input id="pwCur" type="password" class="inp mt-1" placeholder="原口令" autocomplete="current-password">
+    <input id="pwNew" type="password" class="inp mt-1" placeholder="新口令（至少 6 位）" autocomplete="new-password">
+    <input id="pwNew2" type="password" class="inp mt-1" placeholder="再输一遍新口令" autocomplete="new-password">
+    <div class="row mt-2"><button type="button" onclick="chPass()" class="btn">🔑 修改口令</button></div>
+    <div id="pwOut" class="sub mt-1"></div>
     <div class="sec">客户端下载</div>
     <a href="https://5130599.best/see/downloads/see-android.apk" class="link">⬇ 最新版 APK（浏览器打开）</a>
   </div>
@@ -632,6 +639,28 @@ function checkSession(){
     else { loginMode(!!(j && j.need_setup)); showLogin(); }
     return j;
   }).catch(function(){ return {}; });
+}
+function chPass(){
+  var cur=(document.getElementById('pwCur')||{}).value||'';
+  var nw=(document.getElementById('pwNew')||{}).value||'';
+  var nw2=(document.getElementById('pwNew2')||{}).value||'';
+  var o=document.getElementById('pwOut');
+  function say(m, ok){ if(o){ o.textContent=m; o.className='sub mt-1 '+(ok?'c-ok':'c-danger'); } }
+  if(!cur){ return say('请先输入原口令。', false); }
+  if(nw.length<6){ return say('新口令至少 6 位。', false); }
+  if(nw!==nw2){ return say('两次输入的新口令不一致。', false); }
+  if(nw===cur){ return say('新口令和原口令一样。', false); }
+  say('提交中…', true);
+  apiFetch(API+'/pass', {method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({cur:cur, new:nw})})
+    .then(function(r){ return r.json().then(function(j){ return {s:r.status, j:j}; }); })
+    .then(function(x){
+      if(x.j && x.j.ok){
+        say('已改好。这台设备不用重登。', true);
+        ['pwCur','pwNew','pwNew2'].forEach(function(id){ var e=document.getElementById(id); if(e) e.value=''; });
+      } else { say('❌ '+((x.j && x.j.error) || ('HTTP '+x.s)), false); }
+    })
+    .catch(function(){ say('❌ 请求失败', false); });
 }
 function copyMc(){
   var el = document.getElementById('mcKey');
