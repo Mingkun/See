@@ -766,7 +766,7 @@ function gwTick(){
       var t = j.totals || {};
       if (s) s.textContent = '↓' + fmtSpeed(t.wdown) + ' ↑' + fmtSpeed(t.wup) + ' · 有线' + (t.wired || 0) + '/无线' + (t.wireless || 0);
       var box = document.getElementById('gwOut');
-      if (box) box.textContent = '网关 ' + GW.ip + ' 在线 ' + ds.length + ' 台 · ' + new Date().toLocaleTimeString();
+      if (box) box.textContent = '网关 ' + GW.ip + ' 在线 ' + GW.last.length + ' 台 · ' + new Date().toLocaleTimeString();
     })
     .catch(function(){
       var e = document.getElementById('gwErr'); if (e) e.textContent = '连接失败（手机需在网关局域网内）';
