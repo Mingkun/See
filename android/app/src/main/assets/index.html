@@ -27,8 +27,6 @@
   /* 顶部 */
   header { display:flex; align-items:center; justify-content:space-between; gap:var(--sp-2); margin-bottom:var(--sp-3); }
   header h1 { font-size:var(--fs-lg); font-weight:650; letter-spacing:.2px; }
-  .mode { font-size:var(--fs-sm); font-weight:500; padding:3px 10px; border-radius:999px; background:#e0e7ff; color:#3730a3; }
-  .mode.gw { background:#dcfce7; color:#166534; }
   .iconbtn { border:none; background:none; font-size:18px; line-height:1; color:var(--muted); cursor:pointer; padding:2px; }
 
   /* 卡片 */
@@ -156,7 +154,7 @@
 <div class="wrap">
   <header>
     <h1>📡 see · 局域网监控</h1>
-    <div class="hrow"><span class="mode" id="mode">…</span><button id="sysBtn" onclick="openSys()" class="iconbtn">⚙</button></div>
+    <div class="hrow"><button id="sysBtn" onclick="openSys()" class="iconbtn">⚙</button></div>
   </header>
   <div id="viewMon">
   <div class="cards">
@@ -324,9 +322,6 @@ function doScan(){
 function loadStatus(){
   fetch('api/status').then(function(r){return r.json()}).then(function(d){
     if(!d||!d.ok) return;
-    var m=document.getElementById('mode');
-    m.textContent = d.mode==='gateway' ? '网关模式' : '观察模式';
-    m.className = 'mode'+(d.mode==='gateway'?' gw':'');
     document.getElementById('cOn').textContent = d.online + '/' + d.devices;
     document.getElementById('cDn').textContent = fmtSpeed(d.total_speed.down);
     document.getElementById('cUp').textContent = fmtSpeed(d.total_speed.up);
