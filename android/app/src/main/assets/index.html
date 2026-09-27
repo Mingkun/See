@@ -59,6 +59,8 @@
   /* 图标格跟设备名那一行走：默认 middle 会卡在「名称+IP」两行中间，跟谁都对不齐 */
   .tbl-dense td:first-child { vertical-align:top; padding-top:7px; line-height:15.5px; }
   .bdg { font-weight:600; }
+  .sorth { cursor:pointer; -webkit-user-select:none; user-select:none; }
+  .arw { color:var(--brand); font-size:9px; }
   #gwPanel .pt { font-size:var(--fs-sm); }
   #gwPanel .pt .sub { font-size:var(--fs-xs); }
   .celltight { padding-top:0; padding-bottom:10px; }
@@ -193,9 +195,9 @@
   <div class="panel" id="gwPanel" style="display:none">
     <div class="pt"><span>网关设备（实时）</span><span class="sub" id="gwSum"></span></div>
     <div class="scrollx">
-      <table class="tbl-dense">
-        <thead><tr><th>设备</th><th>品牌</th><th>↓ 速度</th><th>↑ 速度</th><th>在线</th></tr></thead>
-        <tbody id="gwBody"><tr><td colspan="5" class="hint">加载中…</td></tr></tbody>
+      <table class="tbl-dense" id="gwTbl">
+        <thead><tr><th class="sorth" onclick="gwSortBy('link')">连接<span class="arw" data-a="link"></span></th><th class="sorth" onclick="gwSortBy('name')">设备<span class="arw" data-a="name"></span></th><th class="sorth" onclick="gwSortBy('brand')">品牌<span class="arw" data-a="brand"></span></th><th class="sorth" onclick="gwSortBy('down')">↓ 速度<span class="arw" data-a="down"></span></th><th class="sorth" onclick="gwSortBy('up')">↑ 速度<span class="arw" data-a="up"></span></th><th class="sorth" onclick="gwSortBy('online')">在线<span class="arw" data-a="online"></span></th></tr></thead>
+        <tbody id="gwBody"><tr><td colspan="6" class="hint">加载中…</td></tr></tbody>
       </table>
     </div>
     <div class="hint" id="gwErr"></div>
@@ -566,7 +568,8 @@ function gwRemote(){
     })
     .catch(function(){ o.textContent = '远程探测失败（检查网络/计划）'; });
 }
-var GW = { ip: '192.168.1.1', user: 'useradmin', on: false, timer: null, fails: 0 };
+var GW = { ip: '192.168.1.1', user: 'useradmin', on: false, timer: null, fails: 0,
+           sort: { k: 'speed', d: -1 }, last: [] };   // 默认按总速率降序（原行为）
 GW['pa' + 'ss'] = '';
 var CFG_URL = 'https://5130599.best/see/api/config';
 var SEE_KEY = 'e3d6bf27b00815b9aca0a5933cefbed1';
@@ -696,6 +699,53 @@ function devMeta(d){
   for (i = 0; i < KINDS.length && !kd; i++) for (j = 0; j < KINDS[i].k.length; j++) { if (s.indexOf(KINDS[i].k[j]) >= 0) { kd = KINDS[i]; break; } }
   return { br: br, kd: kd };
 }
+function gwLink(d){ return d.link === 'wifi' ? '无线' : '有线'; }
+function gwBrandLbl(d){ var m = devMeta(d); return m.br ? m.br.n : (m.kd ? m.kd.l : ''); }
+function gwSortVal(d, k){
+  if (k === 'link') return gwLink(d) === '无线' ? 1 : 0;
+  if (k === 'name') return String(d.name || d.ip || '');
+  if (k === 'brand') return String(gwBrandLbl(d) || '');
+  if (k === 'down') return Number(d.down) || 0;
+  if (k === 'up') return Number(d.up) || 0;
+  if (k === 'online') return Number(d.online_time) || 0;
+  return (Number(d.down) || 0) + (Number(d.up) || 0);   // 默认：总速率
+}
+function gwSortBy(k){
+  if (GW.sort.k === k) GW.sort.d = -GW.sort.d;
+  else { GW.sort.k = k; GW.sort.d = (k === 'name' || k === 'brand' || k === 'link') ? 1 : -1; }
+  gwPaint();
+}
+function gwPaint(){
+  var b = document.getElementById('gwBody'); if (!b) return;
+  var ds = (GW.last || []).slice();
+  var k = GW.sort.k, dir = GW.sort.d;
+  ds.sort(function(x, y){
+    var a = gwSortVal(x, k), c = gwSortVal(y, k);
+    if (typeof a === 'string' || typeof c === 'string'){
+      var r = String(a).localeCompare(String(c), 'zh');
+      return r ? r * dir : String(x.ip || '').localeCompare(String(y.ip || ''));
+    }
+    if (a === c) return String(x.ip || '').localeCompare(String(y.ip || ''));
+    return (a - c) * dir;
+  });
+  if (!ds.length){ b.innerHTML = '<tr><td colspan="6" class="hint">无设备</td></tr>'; }
+  else {
+    b.innerHTML = ds.map(function(d){
+      var m = devMeta(d), br = m.br, lbl = gwBrandLbl(d);
+      return '<tr>'
+        + '<td class="sub">' + gwLink(d) + '</td>'
+        + '<td><div class="name">' + esc(d.name || d.ip) + '</div><div class="sub">' + esc(d.ip) + '</div></td>'
+        + '<td class="sub">' + (lbl ? '<span class="bdg" style="color:' + (br ? br.c : '#94a3b8') + '">' + esc(lbl) + '</span>' : '') + '</td>'
+        + '<td class="num dn">' + fmtSpeed(d.down) + '</td>'
+        + '<td class="num up">' + fmtSpeed(d.up) + '</td>'
+        + '<td class="sub">' + esc(gwDur(d.online_time)) + '</td></tr>';
+    }).join('');
+  }
+  var arws = document.querySelectorAll('#gwTbl thead .arw');
+  for (var i = 0; i < arws.length; i++){
+    arws[i].textContent = (arws[i].getAttribute('data-a') === k) ? (dir > 0 ? ' ▲' : ' ▼') : '';
+  }
+}
 function gwTick(){
   if (!GW.on) return;
   var body = { ip: GW.ip, user: GW.user };
@@ -706,28 +756,13 @@ function gwTick(){
       var b = document.getElementById('gwBody'), s = document.getElementById('gwSum'), e = document.getElementById('gwErr');
       if (!j || !j.ok) {
         if (e) e.textContent = '❌ ' + ((j && j.error) || '拉取失败');
-        if (b) b.innerHTML = '<tr><td colspan="5" class="hint">—</td></tr>';
+        if (b) b.innerHTML = '<tr><td colspan="6" class="hint">—</td></tr>';
         if (s) s.textContent = '';
         return;
       }
       if (e) e.textContent = '';
-      var ds = (j.devices || []).slice().sort(function(x, y){ return (y.down + y.up) - (x.down + x.up); });
-      if (b) {
-        if (!ds.length) { b.innerHTML = '<tr><td colspan="5" class="hint">无设备</td></tr>'; }
-        else {
-          b.innerHTML = ds.map(function(d){
-            var m = devMeta(d), kd = m.kd, br = m.br;
-            var lbl = br ? br.n : (kd ? kd.l : '');
-            var link = d.link === 'wifi' ? '📶' : '🔌';
-            return '<tr>'
-              + '<td><div class="name">' + esc(d.name || d.ip) + '</div><div class="sub">' + link + ' ' + esc(d.ip) + '</div></td>'
-              + '<td class="sub">' + (lbl ? '<span class="bdg" style="color:' + (br ? br.c : '#94a3b8') + '">' + esc(lbl) + '</span>' : '') + '</td>'
-              + '<td class="num dn">' + fmtSpeed(d.down) + '</td>'
-              + '<td class="num up">' + fmtSpeed(d.up) + '</td>'
-              + '<td class="sub">' + esc(gwDur(d.online_time)) + '</td></tr>';
-          }).join('');
-        }
-      }
+      GW.last = j.devices || [];
+      gwPaint();
       var t = j.totals || {};
       if (s) s.textContent = '↓' + fmtSpeed(t.wdown) + ' ↑' + fmtSpeed(t.wup) + ' · 有线' + (t.wired || 0) + '/无线' + (t.wireless || 0);
       var box = document.getElementById('gwOut');
