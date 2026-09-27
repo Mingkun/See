@@ -329,6 +329,9 @@ function seeTab(w){
 <script>
 var curIp = '';
 function esc(s){ var d=document.createElement('div'); d.textContent=s==null?'':String(s); return d.innerHTML; }
+function escA(s){ return esc(s).replace(/"/g, '&quot;'); }
+// 设备名称限长：最多 n 个字符（中文按 1 个字算），超出用「…」占位，保证显示宽度不超过 n
+function cutName(s, n){ s = (s == null ? '' : String(s)); if (!s) return ''; return s.length > n ? s.slice(0, n - 1) + '\u2026' : s; }
 function fmtSpeed(b){ if(!b||b<1) return '0'; if(b<1024) return b.toFixed(0)+' B/s'; if(b<1048576) return (b/1024).toFixed(1)+' K/s'; return (b/1048576).toFixed(2)+' M/s'; }
 function fmtBytes(b){ if(!b) return '0'; if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(1)+' KB'; if(b<1073741824) return (b/1048576).toFixed(1)+' MB'; return (b/1073741824).toFixed(2)+' GB'; }
 function fmtTs(t){ var d=new Date(t*1000); return d.getHours()+':'+(d.getMinutes()<10?'0':'')+d.getMinutes(); }
@@ -734,7 +737,7 @@ function gwPaint(){
       var m = devMeta(d), br = m.br, lbl = gwBrandLbl(d);
       return '<tr>'
         + '<td class="sub">' + gwLink(d) + '</td>'
-        + '<td><div class="name">' + esc(d.name || d.ip) + '</div><div class="sub">' + esc(d.ip) + '</div></td>'
+        + '<td><div class="name" title="' + escA(d.name || d.ip) + '">' + esc(cutName(d.name || d.ip, 10)) + '</div><div class="sub">' + esc(d.ip) + '</div></td>'
         + '<td class="sub">' + (lbl ? '<span class="bdg" style="color:' + (br ? br.c : '#94a3b8') + '">' + esc(lbl) + '</span>' : '') + '</td>'
         + '<td class="num dn">' + fmtSpeed(d.down) + '</td>'
         + '<td class="num up">' + fmtSpeed(d.up) + '</td>'
