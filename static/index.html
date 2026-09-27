@@ -231,7 +231,7 @@
   </div>
   <div class="panel">
     <div class="pt">动态</div>
-    <div  class="sub center-note" id="obsNote">–</div><div id="evBody"><div class="hint">加载中…</div></div>
+    <div id="evBody"><div class="hint">加载中…</div></div>
   </div>
   </div>
 
@@ -376,8 +376,6 @@ function loadStatus(){
   fetch('api/status').then(function(r){return r.json()}).then(function(d){
     if(!d||!d.ok) return;
     document.getElementById('netInfo').textContent = '手机IP '+d.ip+' · 网段 '+d.subnet+' · 观察模式（接入/在线）'+(d.scan_error?' · '+d.scan_error:'')+'；同一WiFi其他设备可访问 http://'+(d.ip||'手机IP')+':5050/';
-    var on=document.getElementById('obsNote');
-    if (on) on.textContent = 'see v'+(d.ver||'')+' · 本机观察模式 · 网关流量由微服采集器提供';
   }).catch(function(){});
 }
 function loadDevices(){
