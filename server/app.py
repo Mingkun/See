@@ -280,7 +280,7 @@ def api_config():
         return jsonify(ok=True, cfg=_load_gwcfg())
     data = request.get_json(force=True, silent=True) or {}
     cfg = _load_gwcfg()
-    for k in ('ip', 'user', 'pass', 'on'):
+    for k in ('ip', 'user', 'pass', 'on', 'anDev', 'anWin'):
         if k in data:
             cfg[k] = data[k]
     _save_gwcfg(cfg)
@@ -343,7 +343,10 @@ def api_gw_series():
     if not key:
         return jsonify(ok=False, error='未指定设备'), 400
     now = int(time.time())
-    frm = now - hours * 3600
+    # 分时桶对齐整点：末端取当前整点的下一个整点，向前推 hours 个整点，
+    # 这样每格都是天然的 1 小时（如 11:00–12:00），而不是 now-24h 的滚动偏移。
+    end = (now // 3600) * 3600 + 3600
+    frm = end - hours * 3600
     n = hours * 60
     speed = [0.0] * n
     cnt = [0] * n
@@ -351,7 +354,7 @@ def api_gw_series():
     has = [0] * n
     name = ''
     ip = ''
-    for r in store.gw_series(key, frm, now + 1):
+    for r in store.gw_series(key, frm, end):
         m = (int(r['ts']) - frm) // 60
         if m < 0 or m >= n:
             continue
@@ -367,7 +370,7 @@ def api_gw_series():
         if k['key'] == key:
             name = k.get('name') or ''
             ip = k.get('ip') or ''
-    return jsonify(ok=True, key=key, name=name, ip=ip, frm=frm, now=now, minutes=n,
+    return jsonify(ok=True, key=key, name=name, ip=ip, frm=frm, now=now, end=end, minutes=n,
                    speed=speed, present=pres, has=has)
 
 

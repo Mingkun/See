@@ -227,7 +227,7 @@
       <button type="button" onclick="anLoad()" class="btn">刷新</button>
     </div>
     <div class="pbody mt-1"><svg id="anChart" class="chart-svg"></svg></div>
-    <div  class="sub legend">横轴 0–24 时 · 纵轴为下行+上行速率（对数显示）；<span class="c-muted">▬</span> 无数据 · <span class="c-muted">▬</span> 休眠/离线 · <span class="c-brand">▬</span> 有流量</div>
+    <div  class="sub legend"><span id="anAxisTxt">横轴 0–24 时</span> · 纵轴为下行+上行速率（对数显示）；<span class="c-muted">▬</span> 无数据 · <span class="c-muted">▬</span> 休眠/离线 · <span class="c-brand">▬</span> 有流量</div>
     <div id="anLegend"  class="sub legend"></div>
   </div>
   <div class="panel" id="anSleepPanel" style="display:none">
@@ -780,18 +780,37 @@ function anPickDev(i){
   var k = (AN.devs || [])[i]; if (!k) return;
   AN.key = k.key;
   var lab = document.getElementById('anDevLab'); if (lab) lab.textContent = anDevLabel(k);
-  anDevItems(); ddCloseAll(); anLoad();
+  anDevItems(); ddCloseAll(); anSaveSel(); anLoad();
 }
 function anPickWin(i){
   var w = AN_WINS[i]; if (!w) return;
   AN.win = w[0];
   var lab = document.getElementById('anWinLab'); if (lab) lab.textContent = w[1];
-  anWinItems(); ddCloseAll(); anLoad();
+  anWinItems(); ddCloseAll(); anSaveSel(); anLoad();
+}
+function anWinLabel(){
+  var lab = document.getElementById('anWinLab');
+  for (var i = 0; i < AN_WINS.length; i++) if (AN_WINS[i][0] === AN.win && lab) lab.textContent = AN_WINS[i][1];
+}
+// 选择结果写回后台（服务器端 data/gw-config.json），下次打开自动恢复
+function anSaveSel(){
+  try {
+    fetch(CFG_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-See-Key': SEE_KEY },
+      body: JSON.stringify({ anDev: AN.key, anWin: AN.win }) });
+  } catch (e) {}
 }
 function anInit(){
   anWinItems();
-  if (!(AN.devs || []).length) anKeys();
-  else { anDevItems(); anLoad(); }
+  // 先恢复上次选择（服务器端持久化），再拉设备列表
+  fetch(CFG_URL, { headers: { 'X-See-Key': SEE_KEY } })
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      var c = (j && j.cfg) || {};
+      if (c.anWin){ var w = parseInt(c.anWin, 10); for (var i = 0; i < AN_WINS.length; i++) if (AN_WINS[i][0] === w) AN.win = w; }
+      if (c.anDev) AN.key = String(c.anDev);
+    })
+    .catch(function(){})
+    .then(function(){ anWinLabel(); anKeys(); });
 }
 function anKeys(){
   fetch('https://5130599.best/see/api/gw/keys?days=7&key=' + encodeURIComponent(SEE_KEY))
@@ -827,6 +846,7 @@ function anLoad(){
     .catch(function(){ document.getElementById('anSub').textContent = '服务器连接失败'; });
 }
 var AN_THR = 4096;
+function anDayLbl(sec){ var d = new Date(sec * 1000); return (d.getMonth() + 1) + '-' + d.getDate(); }
 function anHMin(sec){ var d = new Date(sec * 1000); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
 function anFmtDur(min){ if (min < 60) return Math.round(min) + '分'; return Math.floor(min / 60) + '时' + (Math.round(min % 60) ? Math.round(min % 60) + '分' : ''); }
 function anRender(j){
@@ -840,14 +860,23 @@ function anRender(j){
   var padL = 34, padR = 6, padT = 10, padB = 18;
   var iw = W - padL - padR, ih = H - padT - padB;
   var G = 5, groups = Math.ceil(n / G);
+  // 横轴跟随所选窗口（24/12/6 小时），此前写死 0–24、步长 4
+  var HRS = Math.max(1, Math.round(n / 60));
+  var STEPS = [1, 2, 3, 4, 6, 8, 12, 24], step = 24;
+  for (var si = 0; si < STEPS.length; si++){ step = STEPS[si]; if (HRS / step <= 6) break; }
   var maxV = 1; for (var i = 0; i < n; i++) if (sp[i] > maxV) maxV = sp[i];
   var lg = Math.log10(1 + maxV);
   function yv(v){ var t = Math.log10(1 + v) / lg; if (t < 0) t = 0; if (t > 1) t = 1; return padT + ih - t * ih; }
   var p = [];
-  for (var hh = 0; hh <= 24; hh += 4){
-    var x = padL + (hh / 24) * iw;
+  for (var hh = 0; hh <= HRS; hh += step){
+    var x = padL + (hh / HRS) * iw;
     p.push('<line x1="' + x.toFixed(1) + '" y1="' + padT + '" x2="' + x.toFixed(1) + '" y2="' + (padT + ih) + '" stroke="#f1f4f9"/>');
-    if (hh < 24){ var lbl = anHMin(from + hh * 3600); p.push('<text x="' + x.toFixed(1) + '" y="' + (H - 5) + '" font-size="8" fill="#9aa4b2" text-anchor="middle">' + lbl + '</text>'); }
+    if (hh < HRS){
+      var tt = from + hh * 3600;
+      // 换天时前面带日期，跨午夜后不会看起来「顺序乱」
+      var lbl = ((hh === 0 || anDayLbl(tt) !== anDayLbl(tt - step * 3600)) ? anDayLbl(tt) + ' ' : '') + anHMin(tt);
+      p.push('<text x="' + x.toFixed(1) + '" y="' + (H - 5) + '" font-size="8" fill="#9aa4b2" text-anchor="middle">' + lbl + '</text>');
+    }
   }
   p.push('<line x1="' + padL + '" y1="' + (padT + ih) + '" x2="' + (padL + iw) + '" y2="' + (padT + ih) + '" stroke="#dfe5ee"/>');
   p.push('<text x="4" y="' + (padT + 8) + '" font-size="8" fill="#9aa4b2">' + fmtSpeed(maxV) + '</text>');
@@ -895,11 +924,17 @@ function anRender(j){
     var tot = 0, mx = 0, ct2 = 0, any2 = 0, pr2 = 0;
     for (var k2 = h3 * 60; k2 < (h3 + 1) * 60; k2++){ if (hs[k2]) any2 = 1; if (pr[k2]) pr2 = 1; tot += sp[k2]; if (sp[k2] > mx) mx = sp[k2]; ct2++; }
     var st = !any2 ? '<span class="sub">无数据</span>' : (!pr2 ? '<span class="c-brand">休眠/离线</span>' : (tot / ct2 < AN_THR ? '<span class="c-warn">空闲</span>' : '<span class="c-ok">有流量</span>'));
-    rows.push('<tr><td class="num">' + anHMin(from + h3 * 3600) + '–' + anHMin(from + (h3 + 1) * 3600) + '</td><td class="num">' + fmtSpeed(tot / ct2) + '</td><td class="num">' + fmtSpeed(mx) + '</td><td>' + st + '</td></tr>');
+    var t0 = from + h3 * 3600, t1 = t0 + 3600;
+    // 行序即时间先后（由早到晚，索引 0 为窗口起点）
+    var hlbl = anHMin(t0) + '–' + anHMin(t1);
+    if (h3 === 0 || anDayLbl(t0) !== anDayLbl(t0 - 3600)) hlbl = anDayLbl(t0) + ' ' + hlbl;
+    if (j.now && t1 > j.now) hlbl += ' <span class="sub fs-xs">进行中</span>';
+    rows.push('<tr><td class="num">' + hlbl + '</td><td class="num">' + fmtSpeed(tot / ct2) + '</td><td class="num">' + fmtSpeed(mx) + '</td><td>' + st + '</td></tr>');
   }
   hb.innerHTML = rows.join('');
   var cover = 0; for (var q = 0; q < n; q++) if (hs[q]) cover++;
   document.getElementById('anSub').textContent = (j.name || j.ip || AN.key) + ' · ' + anFmtDur(n) + '窗口';
+  document.getElementById('anAxisTxt').textContent = '横轴 0–' + HRS + ' 时';
   document.getElementById('anLegend').innerHTML = '采样覆盖 ' + (cover / n * 100).toFixed(0) + '%（' + anFmtDur(cover) + '） · 休眠/空闲 ' + runs.length + ' 段 · 空闲阈值 ' + fmtSpeed(AN_THR);
   document.getElementById('anHint').textContent = '数据来自 app 运行期间对网关的采样（每 10 秒 1 次），app 关闭期间不采集；曲线为 5 分钟一格的速率均值。';
 }
