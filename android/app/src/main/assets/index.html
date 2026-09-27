@@ -114,8 +114,10 @@
            white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .ddopt.on { background:#eef4ff; color:var(--brand); font-weight:600; }
   .ddopt:active { background:#f6f8fb; }
-  /* 分时用量：当前小时用红字闪动标识 */
-  .curhour { color:#dc2626 !important; font-weight:600;
+  /* 分时用量：今天的行黑字白底、昨天的行黑字灰底；当前小时红字闪动、白底 */
+  #anHourBody tr.today td { background:#fff; }
+  #anHourBody tr.prev  td { background:#eef1f5; }
+  .curhour { color:#dc2626 !important; font-weight:600; background:#fff;
              -webkit-animation: curblink 1s ease-in-out infinite; animation: curblink 1s ease-in-out infinite; }
   @-webkit-keyframes curblink { 50% { opacity:.2; } }
   @keyframes curblink { 50% { opacity:.2; } }
@@ -877,9 +879,7 @@ function anRender(j){
     var x = padL + (hh / HRS) * iw;
     p.push('<line x1="' + x.toFixed(1) + '" y1="' + padT + '" x2="' + x.toFixed(1) + '" y2="' + (padT + ih) + '" stroke="#f1f4f9"/>');
     if (hh < HRS){
-      var tt = from + hh * 3600;
-      // 换天时前面带日期，跨午夜后不会看起来「顺序乱」
-      var lbl = ((hh === 0 || anDayLbl(tt) !== anDayLbl(tt - step * 3600)) ? anDayLbl(tt) + ' ' : '') + anHMin(tt);
+      var lbl = anHMin(from + hh * 3600);
       p.push('<text x="' + x.toFixed(1) + '" y="' + (H - 5) + '" font-size="8" fill="#9aa4b2" text-anchor="middle">' + lbl + '</text>');
     }
   }
@@ -925,6 +925,7 @@ function anRender(j){
   document.getElementById('anSleepPanel').style.display = '';
   var hb = document.getElementById('anHourBody'), rows = [];
   var nh = Math.floor(n / 60);
+  var today = anDayLbl(j.now || Math.floor(Date.now() / 1000));
   for (var h3 = 0; h3 < nh; h3++){
     var tot = 0, mx = 0, ct2 = 0, any2 = 0, pr2 = 0;
     for (var k2 = h3 * 60; k2 < (h3 + 1) * 60; k2++){ if (hs[k2]) any2 = 1; if (pr[k2]) pr2 = 1; tot += sp[k2]; if (sp[k2] > mx) mx = sp[k2]; ct2++; }
@@ -932,9 +933,10 @@ function anRender(j){
     var t0 = from + h3 * 3600, t1 = t0 + 3600;
     // 行序即时间先后（由早到晚，索引 0 为窗口起点）
     var hlbl = anHMin(t0) + '–' + anHMin(t1);
-    if (h3 === 0 || anDayLbl(t0) !== anDayLbl(t0 - 3600)) hlbl = anDayLbl(t0) + ' ' + hlbl;
     var cur = j.now && t1 > j.now;   // 覆盖 now 的那一格 = 当前小时
-    rows.push('<tr><td class="num' + (cur ? ' curhour' : '') + '">' + hlbl + '</td><td class="num">' + fmtSpeed(tot / ct2) + '</td><td class="num">' + fmtSpeed(mx) + '</td><td>' + st + '</td></tr>');
+    // 底色按自然日区分；不写日期文字
+    var rcls = (cur || anDayLbl(t0) === today) ? 'today' : 'prev';
+    rows.push('<tr class="' + rcls + '"><td class="num' + (cur ? ' curhour' : '') + '">' + hlbl + '</td><td class="num">' + fmtSpeed(tot / ct2) + '</td><td class="num">' + fmtSpeed(mx) + '</td><td>' + st + '</td></tr>');
   }
   hb.innerHTML = rows.join('');
   var cover = 0; for (var q = 0; q < n; q++) if (hs[q]) cover++;
