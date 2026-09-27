@@ -96,8 +96,24 @@
   .inp, .sel { font-family:inherit; font-size:var(--fs-md); color:var(--text); background:#fff;
                border:1px solid #cbd5e1; border-radius:var(--r-1); padding:7px 10px; min-width:0; }
   .inp.sm, .sel.sm { padding:5px 8px; font-size:var(--fs-sm); }
-  /* 分析页两个下拉：写死字号（不用变量），并排两格一致 */
-  #anDev, #anWin { font-size:10px !important; -webkit-text-size-adjust:100%; text-size-adjust:100%; }
+  /* 分析页下拉：原生 <select> 的弹层由系统渲染、CSS 管不到字号，故自绘。
+     弹层用 position:fixed，才能逃出 .panel 的 overflow:hidden 裁切。 */
+  .dd { min-width:0; }
+  .ddbtn { font-family:inherit; font-size:10px; line-height:1.2; color:var(--text); background:#fff;
+           border:1px solid #cbd5e1; border-radius:var(--r-1); padding:6px 8px;
+           display:flex; align-items:center; gap:4px; width:100%; min-width:0; cursor:pointer; text-align:left; }
+  .ddbtn:active { background:#f6f8fb; }
+  .ddlab { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ddcar { color:var(--muted); font-size:9px; line-height:1; }
+  .ddpop { position:fixed; z-index:130; display:none; background:#fff; border:1px solid #cbd5e1;
+           border-radius:var(--r-1); box-shadow:0 8px 20px rgba(15,23,42,.16);
+           font-size:10px; width:max-content; max-width:calc(100vw - 16px);
+           max-height:220px; overflow-y:auto; -webkit-overflow-scrolling:touch; }
+  .dd.open .ddpop { display:block; }
+  .ddopt { font-size:10px; line-height:1.3; padding:6px 8px; cursor:pointer;
+           white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ddopt.on { background:#eef4ff; color:var(--brand); font-weight:600; }
+  .ddopt:active { background:#f6f8fb; }
   .w88 { width:88px; } .w90 { width:90px; } .w110 { width:110px; }
   .grow { flex:1; min-width:0; }
 
@@ -200,12 +216,14 @@
   <div class="panel">
     <div class="pt"><span>📈 流量负载分析</span><span class="sub" id="anSub"></span></div>
     <div class="pbody row">
-      <select id="anDev" onchange="anLoad()" class="sel sm grow" style="font-size:10px"></select>
-      <select id="anWin" onchange="anLoad()" class="sel sm" style="font-size:10px">
-        <option value="24">近 24 小时</option>
-        <option value="12">近 12 小时</option>
-        <option value="6">近 6 小时</option>
-      </select>
+      <div class="dd grow" id="anDevDD">
+        <button type="button" class="ddbtn" onclick="ddToggle(event,'anDevDD')"><span class="ddlab" id="anDevLab">加载中…</span><span class="ddcar">▾</span></button>
+        <div class="ddpop" id="anDevPop" onclick="event.stopPropagation()"></div>
+      </div>
+      <div class="dd" id="anWinDD" style="width:92px;flex:none">
+        <button type="button" class="ddbtn" onclick="ddToggle(event,'anWinDD')"><span class="ddlab" id="anWinLab">近 24 小时</span><span class="ddcar">▾</span></button>
+        <div class="ddpop" id="anWinPop" onclick="event.stopPropagation()"></div>
+      </div>
       <button type="button" onclick="anLoad()" class="btn">刷新</button>
     </div>
     <div class="pbody mt-1"><svg id="anChart" class="chart-svg"></svg></div>
@@ -716,35 +734,92 @@ function gwTick(){
       var e = document.getElementById('gwErr'); if (e) e.textContent = '连接失败（手机需在网关局域网内）';
     });
 }
-var AN = { key: '', last: null };
+var AN = { key: '', last: null, win: 24, devs: [] };
+var AN_WINS = [[24, '近 24 小时'], [12, '近 12 小时'], [6, '近 6 小时']];
+function ddCloseAll(){
+  var xs = document.querySelectorAll('.dd.open');
+  for (var i = 0; i < xs.length; i++) xs[i].classList.remove('open');
+}
+// 弹层 fixed 定位 + 按按钮矩形贴齐；越界时左移夹回屏内
+function ddToggle(e, id){
+  if (e && e.stopPropagation) e.stopPropagation();
+  var d = document.getElementById(id);
+  var wasOpen = d.classList.contains('open');
+  ddCloseAll();
+  if (wasOpen) return;
+  d.classList.add('open');
+  var btn = d.querySelector('.ddbtn'), pop = d.querySelector('.ddpop');
+  var r = btn.getBoundingClientRect();
+  pop.style.minWidth = r.width + 'px';
+  pop.style.left = r.left + 'px';
+  pop.style.top = (r.bottom + 2) + 'px';
+  var pw = pop.getBoundingClientRect().width, maxR = window.innerWidth - 8;
+  if (r.left + pw > maxR) pop.style.left = Math.max(8, maxR - pw) + 'px';
+}
+window.addEventListener('scroll', function(ev){
+  var t = ev.target;
+  if (t && t.closest && t.closest('.ddpop')) return;   // 弹层内部滚动不关闭
+  ddCloseAll();
+}, true);
+window.addEventListener('resize', ddCloseAll);
+document.addEventListener('click', ddCloseAll);
+function anDevLabel(k){ return (k.name || k.ip || k.key) + (k.name && k.ip ? ' · ' + k.ip : ''); }
+function anDevItems(){
+  var pop = document.getElementById('anDevPop'); if (!pop) return;
+  pop.innerHTML = (AN.devs || []).map(function(k, i){
+    return '<div class="ddopt' + (k.key === AN.key ? ' on' : '') + '" onclick="anPickDev(' + i + ')">' + esc(anDevLabel(k)) + '</div>';
+  }).join('');
+}
+function anWinItems(){
+  var pop = document.getElementById('anWinPop'); if (!pop) return;
+  pop.innerHTML = AN_WINS.map(function(w, i){
+    return '<div class="ddopt' + (w[0] === AN.win ? ' on' : '') + '" onclick="anPickWin(' + i + ')">' + w[1] + '</div>';
+  }).join('');
+}
+function anPickDev(i){
+  var k = (AN.devs || [])[i]; if (!k) return;
+  AN.key = k.key;
+  var lab = document.getElementById('anDevLab'); if (lab) lab.textContent = anDevLabel(k);
+  anDevItems(); ddCloseAll(); anLoad();
+}
+function anPickWin(i){
+  var w = AN_WINS[i]; if (!w) return;
+  AN.win = w[0];
+  var lab = document.getElementById('anWinLab'); if (lab) lab.textContent = w[1];
+  anWinItems(); ddCloseAll(); anLoad();
+}
 function anInit(){
-  var sel = document.getElementById('anDev');
-  if (!sel || !sel.options.length || (sel.options.length === 1 && !sel.value)) anKeys();
-  else anLoad();
+  anWinItems();
+  if (!(AN.devs || []).length) anKeys();
+  else { anDevItems(); anLoad(); }
 }
 function anKeys(){
   fetch('https://5130599.best/see/api/gw/keys?days=7&key=' + encodeURIComponent(SEE_KEY))
     .then(function(r){ return r.json(); })
     .then(function(j){
-      var sel = document.getElementById('anDev');
-      if (!sel) return;
+      var lab = document.getElementById('anDevLab');
       var ks = (j && j.keys) || [];
-      if (!ks.length) { sel.innerHTML = '<option value="">暂无采样数据 · 先在 ⚙ 开启实时设备（后台会持续采集）</option>'; document.getElementById('anSub').textContent = '服务器上还没有该设备的采样'; return; }
+      if (!ks.length) {
+        AN.devs = []; AN.key = '';
+        if (lab) lab.textContent = '暂无采样数据';
+        anDevItems();
+        document.getElementById('anSub').textContent = '服务器上还没有采样数据 · 先在 ⚙ 开启实时设备（后台会持续采集）';
+        return;
+      }
       ks.sort(function(a, b){ return String(a.name || a.ip).localeCompare(String(b.name || b.ip)); });
-      sel.innerHTML = ks.map(function(k){
-        var lbl = (k.name || k.ip || k.key) + (k.name && k.ip ? ' · ' + k.ip : '');
-        return '<option value="' + esc(k.key) + '">' + esc(lbl) + '</option>';
-      }).join('');
-      if (AN.key) { try { sel.value = AN.key; } catch(e) {} }
+      AN.devs = ks;
+      var cur = null;
+      for (var i = 0; i < ks.length; i++) if (ks[i].key === AN.key) { cur = ks[i]; break; }
+      if (!cur) cur = ks[0];
+      AN.key = cur.key;
+      if (lab) lab.textContent = anDevLabel(cur);
+      anDevItems();
       anLoad();
     }).catch(function(){ document.getElementById('anSub').textContent = '服务器设备列表读取失败'; });
 }
 function anLoad(){
-  var sel = document.getElementById('anDev');
-  var win = document.getElementById('anWin');
-  var hrs = parseInt((win && win.value) || '24', 10);
-  if (!sel || !sel.value) { document.getElementById('anSub').textContent = '请选择设备'; return; }
-  AN.key = sel.value;
+  var hrs = AN.win || 24;
+  if (!AN.key) { document.getElementById('anSub').textContent = '请选择设备'; return; }
   document.getElementById('anSub').textContent = '加载中…';
   fetch('https://5130599.best/see/api/gw/series?key=' + encodeURIComponent(SEE_KEY) + '&dev=' + encodeURIComponent(AN.key) + '&hours=' + hrs)
     .then(function(r){ return r.json(); })
