@@ -49,6 +49,16 @@ class Scanner(private val db: Db) : Thread() {
     private fun longToIp(v: Long): String =
         "${(v shr 24) and 255}.${(v shr 16) and 255}.${(v shr 8) and 255}.${v and 255}"
 
+    /** 某个 ip 是否落在本机所在网段（观察页只管手机自己的这一层局域网） */
+    private fun inSubnet(ip: String, cidr: String): Boolean {
+        if (cidr.isBlank()) return false
+        val prefix = cidr.substringAfterLast('/').toIntOrNull() ?: 24
+        val hostBits = 32 - prefix
+        val mask = (-1L shl hostBits) and 0xFFFFFFFFL
+        val base = ipToLong(cidr.substringBefore('/')) and mask
+        return (ipToLong(ip) and mask) == base
+    }
+
     private fun sweep() {
         val prefix = subnet.substringAfterLast('/').toIntOrNull() ?: 24
         val hostBits = 32 - prefix
@@ -184,6 +194,9 @@ class Scanner(private val db: Db) : Thread() {
                 val byIp = HashMap<String, Dev>()
                 for ((_, v) in devices) if (v.ip.isNotEmpty()) byIp[v.ip] = v
                 for ((gip, gname) in gw) {
+                    // 关键：手机在级联路由（双重 NAT）下时，网关设备表描述的是「上一层」网络，
+                    // 与本机不同网段，混进来只会串味——只采纳本网段内的。
+                    if (!inSubnet(gip, subnet)) continue
                     val d = byIp[gip] ?: devices.getOrPut("ip:" + gip) {
                         db.upsert("ip:" + gip, gip, gname, "", now)
                         Dev(gip, gname, "", now, true, "🔗 网关确认")
