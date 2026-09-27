@@ -58,6 +58,9 @@
   .tbl-dense { font-size:var(--fs-xs); }
   .tbl-dense th { font-size:var(--fs-xs); font-weight:600; padding:5px; }
   .tbl-dense td { padding:7px 5px; }
+  /* 图标格跟设备名那一行走：默认 middle 会卡在「名称+IP」两行中间，跟谁都对不齐 */
+  .tbl-dense td:first-child { vertical-align:top; padding-top:7px; line-height:15.5px; }
+  .ico { display:inline-block; font-size:12px; line-height:15.5px; }
   #gwPanel .pt { font-size:var(--fs-sm); }
   #gwPanel .pt .sub { font-size:var(--fs-xs); }
   .celltight { padding-top:0; padding-bottom:10px; }
@@ -745,7 +748,7 @@ function gwTick(){
         if (!ds.length) { b.innerHTML = '<tr><td colspan="6" class="hint">无设备</td></tr>'; }
         else {
           b.innerHTML = ds.map(function(d){
-            return '<tr><td>' + (d.link === 'wifi' ? '📶' : '🔌') + '</td>'
+            return '<tr><td><span class="ico">' + (d.link === 'wifi' ? '📶' : '🔌') + '</span></td>'
               + '<td><div class="name">' + esc(d.name || d.ip) + '</div><div class="sub">' + esc(d.ip) + '</div></td>'
               + '<td class="sub">' + esc(d.brand || '') + '</td>'
               + '<td class="num dn">' + fmtSpeed(d.down) + '</td>'
