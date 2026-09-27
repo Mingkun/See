@@ -5,6 +5,7 @@ import android.app.Activity
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
+import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.os.Bundle
 import android.webkit.WebView
@@ -259,10 +260,38 @@ class MainActivity : Activity() {
         if (g.isNotBlank()) scanner.gateway = g
     }
 
-    private fun gwIp(): String {
+    /**
+     * 局域网（WiFi / 有线）这一层的链路信息。
+     *
+     * 不能用 activeNetwork：手机上挂了 VPN / 代理（tun）时，系统把 VPN 当成默认网络，
+     * activeNetwork 会指向 tun 接口（地址形如 172.19.0.2/24），于是「本机IP / 网段 / 网关」
+     * 全被算成隧道那张网 —— 观察页就会去扫 172.19.0.0/24，并把真正的局域网设备当成「网段外」丢掉。
+     * 观察页只关心手机所在的那层局域网，所以优先取 WiFi / 有线网络；取不到再退回 activeNetwork。
+     */
+    private fun lanLink(): android.net.LinkProperties? {
         return try {
             val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-            val lp = cm.getLinkProperties(cm.activeNetwork) ?: return ""
+            for (n in cm.allNetworks) {
+                val nc = cm.getNetworkCapabilities(n) ?: continue
+                if (nc.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) || nc.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) {
+                    val lp = cm.getLinkProperties(n)
+                    if (lp != null) return lp
+                }
+            }
+            null
+        } catch (_: Exception) { null }
+    }
+
+    private fun linkProps(): android.net.LinkProperties? {
+        return try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            lanLink() ?: cm.getLinkProperties(cm.activeNetwork)
+        } catch (_: Exception) { null }
+    }
+
+    private fun gwIp(): String {
+        return try {
+            val lp = linkProps() ?: return ""
             for (r in lp.routes) {
                 val g = r.gateway?.hostAddress
                 if (!g.isNullOrEmpty()) return g
@@ -273,8 +302,7 @@ class MainActivity : Activity() {
 
     private fun ipInfo(): Pair<String, Int>? {
         return try {
-            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-            val lp = cm.getLinkProperties(cm.activeNetwork) ?: return null
+            val lp = linkProps() ?: return null
             for (la in lp.linkAddresses) {
                 val a = la.address
                 if (a is Inet4Address && !a.isLoopbackAddress) return Pair(a.hostAddress ?: continue, la.prefixLength)
