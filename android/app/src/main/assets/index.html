@@ -208,8 +208,8 @@
     <div class="pt"><span>设备</span><button id="scanBtn" onclick="doScan()" class="btn sm">🔄 立即扫描</button></div>
     <div class="scrollx">
     <table>
-      <thead><tr><th></th><th>设备</th><th>厂商</th><th>↓ 速度</th><th>↑ 速度</th><th>今日流量</th></tr></thead>
-      <tbody id="devBody"><tr><td colspan="6" class="hint">加载中…</td></tr></tbody>
+      <thead><tr><th></th><th>设备</th><th>↓ 速度</th><th>↑ 速度</th><th>今日流量</th></tr></thead>
+      <tbody id="devBody"><tr><td colspan="5" class="hint">加载中…</td></tr></tbody>
     </table>
     </div>
     <div class="hint" id="netInfo"></div>
@@ -355,14 +355,13 @@ function loadDevices(){
   fetch('api/devices').then(function(r){return r.json()}).then(function(d){
     if(!d||!d.ok) return;
     var day=0, b=document.getElementById('devBody');
-    if(!d.devices.length){ b.innerHTML='<tr><td colspan="6" class="hint">暂未发现设备 · 确保已连WiFi；点右上「立即扫描」（首轮约10-30秒；若路由器开了AP隔离则互相不可见）</td></tr>'; return; }
+    if(!d.devices.length){ b.innerHTML='<tr><td colspan="5" class="hint">暂未发现设备 · 确保已连WiFi；点右上「立即扫描」（首轮约10-30秒；若路由器开了AP隔离则互相不可见）</td></tr>'; return; }
     var html='';
     d.devices.forEach(function(v){
       day += (v.today.up||0)+(v.today.down||0);
       html+='<tr class="dev" data-ip="'+esc(v.ip)+'">'
         +'<td><span class="dot'+(v.online?' on':'')+'"></span></td>'
         +'<td><div class="name" title="'+escA(v.hostname||v.type||v.ip)+'">'+esc(cutName(v.hostname||v.type||v.ip, 10))+'</div><div class="sub">'+esc([v.ip, v.hostname?(v.type||''):'', v.mac].filter(Boolean).join(' · '))+'</div></td>'
-        +'<td class="sub">'+esc(v.vendor||'')+'</td>'
         +'<td class="num dn">'+fmtSpeed(v.speed.down)+'</td>'
         +'<td class="num up">'+fmtSpeed(v.speed.up)+'</td>'
         +'<td class="num">'+fmtBytes((v.today.up||0)+(v.today.down||0))+'</td></tr>';
