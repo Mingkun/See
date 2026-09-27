@@ -141,6 +141,10 @@ class Scanner(private val db: Db) : Thread() {
     } catch (_: Exception) { false }
 
     private fun readArp(): Map<String, String> {
+        // 注意：/proc/net/arp 是**本机所有接口共用**的一张表，不限于 WiFi。
+        // 只要有过通信，VPN / 容器 / 热点等接口的地址也会出现在里面
+        // （实测用户在 192.168.1.x 的网里被扫出 172.19.0.2）。
+        // 过滤统一在 merge() 里按本机网段做（单一的漏斗），不在这里重复。
         val out = mutableMapOf<String, String>()
         try {
             val lines = File("/proc/net/arp").readText().split('\n')
@@ -158,6 +162,8 @@ class Scanner(private val db: Db) : Thread() {
         synchronized(lock) {
             for ((ip, mac) in found) {
                 if (mac == "00:00:00:00:00:00") continue
+                // 只认本机所在网段：ARP 表跨接口，VPN/容器会把别的网段带进来
+                if (subnet.isNotBlank() && !inSubnet(ip, subnet)) continue
                 val d = devices[mac]
                 if (d == null) {
                     devices[mac] = Dev(ip, "", "", now, true)
@@ -190,12 +196,18 @@ class Scanner(private val db: Db) : Thread() {
                     }
                 }
             }
+            val foreign = mutableListOf<String>()
             for ((mac, d) in devices) {
+                // 已经混进来的外网段设备（历史数据）直接清掉，不留残留
+                if (subnet.isNotBlank() && d.ip.isNotEmpty() && !inSubnet(d.ip, subnet)) {
+                    foreign.add(mac); continue
+                }
                 if (d.online && now - d.lastSeen > 30) {
                     d.online = false
                     addEventLocked("offline", d.ip, mac, d.hostname)
                 }
             }
+            for (k in foreign) { devices.remove(k); knownMacs.remove(k); db.deleteDevice(k) }
             // 网关兜底：手机侧 ping/ARP 看不到的设备（IoT 模块不回 ping、AP 隔离、
             // 新安卓读不到 /proc/net/arp），用网关报的在网设备补上，避免「监控页有数据、观察页离线」
             val gw = GwFeed.fresh(now, 90)

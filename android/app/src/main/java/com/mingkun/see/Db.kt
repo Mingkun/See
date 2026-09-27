@@ -63,6 +63,11 @@ class Db(ctx: Context) : SQLiteOpenHelper(ctx, "see.db", null, 2) {
         writableDatabase.delete("devices", null, null)
     }
 
+    /** 删除单台设备（用于清掉混进来的外网段设备）。 */
+    fun deleteDevice(mac: String) {
+        writableDatabase.delete("devices", "mac=?", arrayOf(mac))
+    }
+
     // ---- 网关流量采样 ----
 
     fun addSample(ts: Long, devkey: String, name: String, ip: String, present: Int, up: Double, down: Double) {
