@@ -1,0 +1,22 @@
+[Unit]
+Description=see 采集器（华为网关设备流量 -> 5130599.best/see）
+Documentation=https://5130599.best/see/
+# 有线接入推荐等 network-online；WiFi 接入也适用（网络就绪前会重试）
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 密钥放 /etc/see/api-key 单独文件（不要写进命令行，ps 能看到）
+ExecStart=/usr/bin/python3 /opt/see/see_collector.py --api-base https://5130599.best/see --key-file /etc/see/api-key
+Restart=always
+RestartSec=10
+# 需要 arp 扫描（观察页那部分）时用 root；只做网关采集可改成 nobody
+User=root
+Nice=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=see-collector
+
+[Install]
+WantedBy=multi-user.target
