@@ -96,8 +96,8 @@
   .inp, .sel { font-family:inherit; font-size:var(--fs-md); color:var(--text); background:#fff;
                border:1px solid #cbd5e1; border-radius:var(--r-1); padding:7px 10px; min-width:0; }
   .inp.sm, .sel.sm { padding:5px 8px; font-size:var(--fs-sm); }
-  /* 分析页两个下拉：设备名较长，字号单独收小（并排两格保持一致） */
-  #anDev, #anWin { font-size:var(--fs-xs); }
+  /* 分析页两个下拉：写死字号（不用变量），并排两格一致 */
+  #anDev, #anWin { font-size:10px !important; -webkit-text-size-adjust:100%; text-size-adjust:100%; }
   .w88 { width:88px; } .w90 { width:90px; } .w110 { width:110px; }
   .grow { flex:1; min-width:0; }
 
@@ -200,8 +200,8 @@
   <div class="panel">
     <div class="pt"><span>📈 流量负载分析</span><span class="sub" id="anSub"></span></div>
     <div class="pbody row">
-      <select id="anDev" onchange="anLoad()" class="sel sm grow"></select>
-      <select id="anWin" onchange="anLoad()" class="sel sm">
+      <select id="anDev" onchange="anLoad()" class="sel sm grow" style="font-size:10px"></select>
+      <select id="anWin" onchange="anLoad()" class="sel sm" style="font-size:10px">
         <option value="24">近 24 小时</option>
         <option value="12">近 12 小时</option>
         <option value="6">近 6 小时</option>
