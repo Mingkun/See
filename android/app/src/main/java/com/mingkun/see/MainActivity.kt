@@ -23,52 +23,6 @@ class MainActivity : Activity() {
 
     inner class Bridge {
         @android.webkit.JavascriptInterface
-        fun gwBg(on: Boolean) {
-            try {
-                if (on) GwService.start(this@MainActivity) else GwService.stop(this@MainActivity)
-            } catch (_: Exception) {}
-        }
-
-        @android.webkit.JavascriptInterface
-        fun gwBgOn(): Boolean = GwService.running
-
-        /** 申请忽略电池优化（国产 ROM 杀后台的主因之一） */
-        @android.webkit.JavascriptInterface
-        fun battery() {
-            runOnUiThread {
-                try {
-                    val pm = getSystemService(POWER_SERVICE) as android.os.PowerManager
-                    if (pm.isIgnoringBatteryOptimizations(packageName)) {
-                        android.widget.Toast.makeText(this@MainActivity, "已在白名单：后台采集不会被省电限制", android.widget.Toast.LENGTH_LONG).show()
-                        return@runOnUiThread
-                    }
-                    val i = android.content.Intent(
-                        android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
-                    i.data = android.net.Uri.parse("package:" + packageName)
-                    startActivity(i)
-                } catch (e: Exception) {
-                    try {
-                        startActivity(android.content.Intent(
-                            android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
-                    } catch (_: Exception) {}
-                }
-            }
-        }
-
-        /** 打开本应用的系统详情页（部分 ROM 的“自启动管理”入口在里面） */
-        @android.webkit.JavascriptInterface
-        fun appSettings() {
-            runOnUiThread {
-                try {
-                    val i = android.content.Intent(
-                        android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-                    i.data = android.net.Uri.parse("package:" + packageName)
-                    startActivity(i)
-                } catch (_: Exception) {}
-            }
-        }
-
-        @android.webkit.JavascriptInterface
         fun confirmUpdate(ver: String, url: String) {
             runOnUiThread {
                 android.app.AlertDialog.Builder(this@MainActivity)

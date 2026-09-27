@@ -92,6 +92,8 @@
   .sec { font-size:var(--fs-sm); font-weight:700; letter-spacing:.4px; color:var(--muted); margin:var(--sp-4) 0 var(--sp-2); }
   /* 网页版隐藏安卓专属入口（app 内由 SeeBridge 提供） */
   body.web .app-only { display:none; }
+  /* app 端（纯查看客户端）隐藏采集侧配置：网关账号与开关只在网页里配（微服采集器读它） */
+  body.app .collect { display:none; }
   .sec:first-child { margin-top:0; }
   .h2 { font-size:var(--fs-lg); font-weight:650; }
   .link { display:inline-block; margin-top:var(--sp-1); font-size:var(--fs-md); color:var(--brand); }
@@ -201,11 +203,11 @@
   <div id="viewMon">
   <div class="panel" id="topoPanel">
     <div class="pt"><span>📡 网络拓扑</span><span class="sub" id="topoSum">–</span></div>
-    <div class="stline">在线 <b id="cOn">–</b> · ↓ <b class="dn" id="cDn">–</b> · ↑ <b class="up" id="cUp">–</b> · 今日 <b id="cDay">–</b></div>
+    <div class="stline">在线 <b id="cOn">–</b> · ↓ <b class="dn" id="cDn">–</b> · ↑ <b class="up" id="cUp">–</b> · 数据 <b id="cDay">–</b></div>
     <div class="topo-wrap"><svg id="topoSvg" class="topo-svg" viewBox="0 0 340 40"></svg></div>
     <div class="hint" id="topoHint"></div>
   </div>
-  <div class="panel" id="gwPanel" style="display:none">
+  <div class="panel" id="gwPanel">
     <div class="pt"><span>网关设备</span><span class="sub" id="gwSum"></span></div>
     <div class="scrollx">
       <table class="tbl-dense" id="gwTbl">
@@ -280,7 +282,9 @@
     <div class="sub" id="sysVer">–</div>
     <button id="updBtn" onclick="checkUpdate()" class="btn mt-2">🔄 检查更新</button>
     <div id="updOut" class="sub mt-2"></div>
-    <div class="sec">网关对接（实验）</div>
+    <div class="collect">
+    <div class="sec">云端采集（微服）</div>
+    <div class="sub ml-0 mt-1">手机端不再采集：网关数据由家里的微服采集器上报，app 只负责查看。这里配的是采集器登录网关的账号，以及它的总开关。</div>
     <div class="row mt-1">
       <input id="gwIp" value="192.168.1.1" class="inp w110">
       <button type="button" onclick="gwProbe()" class="btn">🔍 探测接口</button>
@@ -289,17 +293,13 @@
       <input id="gwUser" placeholder="账号" value="useradmin" class="inp w90">
       <input id="gwPass" placeholder="密码" type="password" class="inp w110">
       <button type="button" onclick="gwEnum()" class="btn">🔑 登录枚举</button>
-      <button type="button" onclick="gwStart()" class="btn primary">📶 开启实时设备</button>
-      <button type="button" onclick="gwStop()" class="btn ghost">⏹ 停止</button>
-      <button type="button" onclick="gwSave()" class="btn">💾 保存配置</button>
       <button type="button" onclick="gwRemote()" class="btn">🌐 远程探测</button>
     </div>
+    <div class="row mt-2">
+      <button type="button" onclick="gwSave()" class="btn">💾 保存配置</button>
+      <button type="button" id="gwOnBtn" onclick="gwCollect()" class="btn">📡 采集开关</button>
+    </div>
     <div id="gwOut" class="sub mt-2"></div>
-    <div class="sec">后台保活</div>
-    <div class="sub ml-0 mt-1">开启实时设备后，本机前台服务会持续采集并上传服务器（关掉界面也继续）；开机后会自动恢复。</div>
-    <div class="row mt-2 app-only">
-      <button type="button" onclick="battery()" class="btn">🔋 电池白名单</button>
-      <button type="button" onclick="appSettings()" class="btn">⚙ 系统设置（自启动）</button>
     </div>
     <div class="sec">客户端下载</div>
     <a href="https://5130599.best/see/downloads/see-android.apk" class="link">⬇ 最新版 APK（浏览器打开）</a>
@@ -312,8 +312,8 @@
   <button id="tabAn" type="button" onclick="seeTab('an')" class="tab"><span class="sym">📈</span>分析</button>
 </div>
 <script>
-/* 非安卓环境（公网网页版）标记为 web：隐藏安卓专属入口，仍走同一份页面 */
-try { if (!window.SeeBridge) document.body.classList.add('web'); } catch (e) {}
+/* 非安卓环境（公网网页版）标记为 web：隐藏安卓专属入口；app 内反之隐藏采集侧配置 */
+try { document.body.classList.add(window.SeeBridge ? 'app' : 'web'); } catch (e) {}
 function seeTab(w){
   document.getElementById('viewMon').style.display = w==='mon' ? '' : 'none';
   document.getElementById('viewObs').style.display = w==='obs' ? '' : 'none';
@@ -361,12 +361,9 @@ function doScan(){
 function loadStatus(){
   fetch('api/status').then(function(r){return r.json()}).then(function(d){
     if(!d||!d.ok) return;
-    document.getElementById('cOn').textContent = d.online + '/' + d.devices;
-    document.getElementById('cDn').textContent = fmtSpeed(d.total_speed.down);
-    document.getElementById('cUp').textContent = fmtSpeed(d.total_speed.up);
     document.getElementById('netInfo').textContent = '手机IP '+d.ip+' · 网段 '+d.subnet+' · 观察模式（接入/在线）'+(d.scan_error?' · '+d.scan_error:'')+'；同一WiFi其他设备可访问 http://'+(d.ip||'手机IP')+':5050/';
     var on=document.getElementById('obsNote');
-    if (on) on.textContent = 'see v'+(d.ver||'')+' · 手机观察模式 · 流量统计需网关部署';
+    if (on) on.textContent = 'see v'+(d.ver||'')+' · 本机观察模式 · 网关流量由微服采集器提供';
   }).catch(function(){});
 }
 function loadDevices(){
@@ -386,7 +383,6 @@ function loadDevices(){
         +'<td class="num">'+fmtBytes((v.today.up||0)+(v.today.down||0))+'</td></tr>';
     });
     b.innerHTML=html;
-    document.getElementById('cDay').textContent=fmtBytes(day);
     Array.prototype.forEach.call(b.querySelectorAll('tr.dev'),function(tr){
       tr.addEventListener('click',function(){ openDetail(tr.getAttribute('data-ip')); });
     });
@@ -605,13 +601,9 @@ function gwApply(cfg){
   if (a) a.value = GW.ip; if (b) b.value = GW.user; if (c) c.value = GW['pa' + 'ss'];
 }
 function gwBoot(){
-  if (GW.on) {
-    gwShow(); gwTick(); if (!GW.timer) GW.timer = setInterval(gwTick, 5000);
-    try { if (window.SeeBridge && SeeBridge.gwBg) SeeBridge.gwBg(true); } catch(e) {}
-  }
+  // app 不再是采集端：监控页数据一律读服务器（微服采集器上报的那份），所以常驻刷新
+  gwShow(); gwTick(); if (!GW.timer) GW.timer = setInterval(gwTick, 5000);
 }
-function battery(){ try { if (window.SeeBridge && SeeBridge.battery) SeeBridge.battery(); } catch(e) {} }
-function appSettings(){ try { if (window.SeeBridge && SeeBridge.appSettings) SeeBridge.appSettings(); } catch(e) {} }
 function gwLoad(){
   // 先用本地缓存即时生效，再向服务器拉取统一配置覆盖
   try { gwApply(JSON.parse(localStorage.getItem('gwCfg') || '{}')); } catch(e) {}
@@ -622,8 +614,6 @@ function gwLoad(){
       if (!j || !j.ok) return;
       gwApply(j.cfg || {});
       localStorage.setItem('gwCfg', JSON.stringify(GW));
-      var o = document.getElementById('gwOut');
-      if (o && !GW.on) o.textContent = '☁ 已从服务器载入配置';
       gwBoot();
     }).catch(function(){});
 }
@@ -651,19 +641,22 @@ function gwSave(){
 }
 function gwShow(){ var p = document.getElementById('gwPanel'); if (p) p.style.display = ''; }
 function gwStart(){
-  gwSave(); GW.on = true; GW.fails = 0; localStorage.setItem('gwCfg', JSON.stringify(GW)); gwPush();
-  gwShow(); gwTick();
-  if (!GW.timer) GW.timer = setInterval(gwTick, 5000);
-  try { if (window.SeeBridge && SeeBridge.gwBg) SeeBridge.gwBg(true); } catch(e) {}
-  var o = document.getElementById('gwOut'); if (o) o.textContent = '已开启：前台服务常驻采集，关掉界面也会继续';
+  // 旧名字保留（外部没引用，但避免旧缓存页面报错）
+  gwCollect();
 }
-function gwStop(){
-  GW.on = false; localStorage.setItem('gwCfg', JSON.stringify(GW)); gwPush();
-  if (GW.timer) { clearInterval(GW.timer); GW.timer = null; }
-  try { if (window.SeeBridge && SeeBridge.gwBg) SeeBridge.gwBg(false); } catch(e) {}
-  var p = document.getElementById('gwPanel'); if (p) p.style.display = 'none';
-  GW.last = []; topoPaint();
-  var o = document.getElementById('gwOut'); if (o) o.textContent = '已停止采集（后台服务已关）';
+function gwCollect(){
+  // 只切服务器的采集开关：微服采集器每 5 分钟读一次它决定采不采
+  GW.on = !GW.on;
+  localStorage.setItem('gwCfg', JSON.stringify(GW));
+  gwPush();
+  gwBtnLabel();
+  var o = document.getElementById('gwOut');
+  if (o) o.textContent = GW.on ? '云端采集：已开启（微服会继续上报）' : '云端采集：已暂停';
+}
+function gwStop(){ gwCollect(); }
+function gwBtnLabel(){
+  var b = document.getElementById('gwOnBtn');
+  if (b) b.textContent = GW.on ? '⏸ 暂停云端采集' : '▶ 开启云端采集';
 }
 function gwDur(s){
   if (!s) return '—';
@@ -722,7 +715,7 @@ function devMeta(d){
   for (i = 0; i < KINDS.length && !kd; i++) for (j = 0; j < KINDS[i].k.length; j++) { if (s.indexOf(KINDS[i].k[j]) >= 0) { kd = KINDS[i]; break; } }
   return { br: br, kd: kd };
 }
-function gwLink(d){ return d.link === 'wifi' ? '无线' : '有线'; }
+function gwLink(d){ if (d.link === 'wifi') return '无线'; if (d.link === 'wired') return '有线'; return '—'; }
 function gwBrandLbl(d){ var m = devMeta(d); return m.br ? m.br.n : (m.kd ? m.kd.l : ''); }
 function gwSortVal(d, k){
   if (k === 'link') return gwLink(d) === '无线' ? 1 : 0;
@@ -764,7 +757,7 @@ function topoPaint(){
   if (!ds.length){
     svg.innerHTML = ''; svg.setAttribute('viewBox', '0 0 340 40');
     if (sum) sum.textContent = '';
-    if (hint) hint.textContent = GW.on ? '暂无设备数据' : '未开启实时设备 · 在 ⚙ 里点「📶 开启实时设备」后显示拓扑';
+    if (hint) hint.textContent = '暂无设备数据 · 等微服采集器上报（10 秒一轮、60 秒上传一次）';
     return;
   }
   if (hint) hint.textContent = '';
@@ -821,19 +814,13 @@ function gwPaint(){
   }
 }
 function gwTick(){
-  if (!GW.on) return;
-  var body = { ip: GW.ip, user: GW.user };
-  body['pa' + 'ss'] = GW['pa' + 'ss'];
-  fetch('api/gw/devices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  // 数据源 = 服务器（微服采集器写的快照），不再由手机登网关
+  fetch('https://5130599.best/see/api/gw/devices', { headers: { 'X-See-Key': SEE_KEY } })
     .then(function(r){ return r.json(); })
     .then(function(j){
       var b = document.getElementById('gwBody'), s = document.getElementById('gwSum'), e = document.getElementById('gwErr');
       if (!j || !j.ok) {
-        if (e) {
-          var det = (j && (j.http || j.len || j.snip))
-            ? ' [HTTP ' + (j.http || 0) + ' · ' + (j.len || 0) + 'B' + (j.snip ? ' · ' + j.snip : '') + ']' : '';
-          e.textContent = '❌ ' + ((j && j.error) || '拉取失败') + det;
-        }
+        if (e) e.textContent = '❌ ' + ((j && j.error) || '拉取失败') + '（检查微服采集器是否在跑）';
         if (b) b.innerHTML = '<tr><td colspan="5" class="hint">—</td></tr>';
         if (s) s.textContent = '';
         return;
@@ -842,10 +829,16 @@ function gwTick(){
       GW.last = j.devices || [];
       gwPaint();
       topoPaint();
-      var t = j.totals || {};
-      if (s) s.textContent = '↓' + fmtSpeed(t.wdown) + ' ↑' + fmtSpeed(t.wup) + ' · 有线' + (t.wired || 0) + '/无线' + (t.wireless || 0);
+      var t = j.totals || {}, dn = 0, up = 0, i;
+      for (i = 0; i < GW.last.length; i++){ dn += Number(GW.last[i].down) || 0; up += Number(GW.last[i].up) || 0; }
+      if (s) s.textContent = '↓' + fmtSpeed(dn) + ' ↑' + fmtSpeed(up) + ' · 有线' + (t.wired || 0) + '/无线' + (t.wireless || 0);
+      var a = document.getElementById('cOn'); if (a) a.textContent = GW.last.length + ' 台';
+      a = document.getElementById('cDn'); if (a) a.textContent = fmtSpeed(dn);
+      a = document.getElementById('cUp'); if (a) a.textContent = fmtSpeed(up);
+      a = document.getElementById('cDay');
+      if (a) a.textContent = (j.age < 0) ? '—' : (j.age < 120 ? j.age + ' 秒前' : Math.round(j.age / 60) + ' 分钟前');
       var box = document.getElementById('gwOut');
-      if (box) box.textContent = '网关 ' + GW.ip + ' 在线 ' + GW.last.length + ' 台 · ' + new Date().toLocaleTimeString();
+      if (box) box.textContent = '数据来自微服采集器 · 网关 ' + (GW.ip || '') + ' · ' + new Date().toLocaleTimeString();
     })
     .catch(function(){
       var e = document.getElementById('gwErr'); if (e) e.textContent = '连接失败（手机需在网关局域网内）';
@@ -953,7 +946,7 @@ function anKeys(){
         AN.devs = []; AN.key = '';
         if (lab) lab.textContent = '暂无采样数据';
         anDevItems();
-        document.getElementById('anSub').textContent = '服务器上还没有采样数据 · 先在 ⚙ 开启实时设备（后台会持续采集）';
+        document.getElementById('anSub').textContent = '服务器上还没有采样数据 · 查微服采集器是否在跑（journalctl -u see-collector）';
         return;
       }
       ks.sort(function(a, b){ return String(a.name || a.ip).localeCompare(String(b.name || b.ip)); });

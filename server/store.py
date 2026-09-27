@@ -35,6 +35,10 @@ class Store:
             CREATE INDEX IF NOT EXISTS idx_gws_key_ts ON gw_samples(devkey, ts);
             CREATE INDEX IF NOT EXISTS idx_gws_ts ON gw_samples(ts);
             ''')
+            # link（有线/无线）：老库没有这列，补上（采集器新版才会填；空值=未知）
+            cols = [r[1] for r in self._db.execute('PRAGMA table_info(gw_samples)')]
+            if 'link' not in cols:
+                self._db.execute("ALTER TABLE gw_samples ADD COLUMN link TEXT DEFAULT ''")
             self._db.commit()
 
     # ---------- devices ----------
@@ -113,7 +117,7 @@ class Store:
 
     # ---------- 网关设备流量采样（app 上传）----------
     def add_gw_samples(self, rows):
-        """rows: iterable of (ts, devkey, name, ip, present, up, down)"""
+        """rows: iterable of (ts, devkey, name, ip, present, up, down[, link])  —— 第 8 项可选"""
         vals = []
         for r in rows:
             try:
@@ -121,18 +125,57 @@ class Store:
                 name = str(r[2] or '')[:64]; ip = str(r[3] or '')[:64]
                 present = 1 if r[4] else 0
                 up = float(r[5] or 0); down = float(r[6] or 0)
+                link = str(r[7] or '')[:16] if len(r) > 7 else ''
             except Exception:  # noqa: BLE001
                 continue
             if not key or ts <= 0:
                 continue
-            vals.append((ts, key, name, ip, present, up, down))
+            vals.append((ts, key, name, ip, present, up, down, link))
         if not vals:
             return 0
         with self._lock:
             self._db.executemany(
-                'INSERT OR IGNORE INTO gw_samples(ts, devkey, name, ip, present, up, down) VALUES(?,?,?,?,?,?,?)', vals)
+                'INSERT OR IGNORE INTO gw_samples(ts, devkey, name, ip, present, up, down, link)'
+                ' VALUES(?,?,?,?,?,?,?,?)', vals)
             self._db.commit()
         return len(vals)
+
+    def gw_latest(self, since, window=900):
+        """每台设备最近一条采样，外加以「present 连续段」推算的在线时长。
+
+        since: 只返回最近一条 ts 不早于它的设备（太久没数据=已经不在网里）。
+        window: 连续在线允许的最大采样间隔（秒）；断档超过它就从那段重新计时。
+        """
+        now = int(time.time())
+        out = []
+        with self._lock:
+            rows = self._db.execute(
+                'SELECT s.devkey, s.ts, s.name, s.ip, s.present, s.up, s.down, s.link'
+                '  FROM gw_samples s'
+                '  JOIN (SELECT devkey, MAX(ts) mts FROM gw_samples GROUP BY devkey) m'
+                '    ON s.devkey=m.devkey AND s.ts=m.mts'
+                ' WHERE s.ts>=?', (int(since),)).fetchall()
+            for r in rows:
+                online = 0
+                if r['present']:
+                    start = r['ts']; prev = now
+                    for p in self._db.execute(
+                            'SELECT ts, present FROM gw_samples WHERE devkey=? AND ts<=?'
+                            ' ORDER BY ts DESC LIMIT 500', (r['devkey'], now)):
+                        if not p['present']:
+                            break
+                        if prev - p['ts'] > window:
+                            break
+                        start = p['ts']; prev = p['ts']
+                    online = max(0, now - start)
+                out.append({
+                    'key': r['devkey'], 'name': r['name'] or '', 'ip': r['ip'] or '',
+                    'link': r['link'] or '', 'present': 1 if r['present'] else 0,
+                    'up': float(r['up'] or 0), 'down': float(r['down'] or 0),
+                    'ts': int(r['ts']), 'online_time': online,
+                })
+        out.sort(key=lambda d: -((d['up'] or 0) + (d['down'] or 0)))
+        return out
 
     def gw_keys(self, since):
         with self._lock:
@@ -145,6 +188,14 @@ class Store:
             return [dict(r) for r in self._db.execute(
                 'SELECT ts, present, up, down FROM gw_samples WHERE devkey=? AND ts>=? AND ts<? ORDER BY ts',
                 (devkey, int(frm), int(to)))]
+
+    def gw_last_link(self):
+        """devkey -> 最近一次已知的链路类型（有线/无线），给没带 link 的采样兜底"""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT devkey, link FROM gw_samples WHERE link<>''"
+                ' GROUP BY devkey HAVING ts=MAX(ts)').fetchall()
+        return {r['devkey']: r['link'] for r in rows}
 
     def prune_gw_samples(self, before):
         with self._lock:

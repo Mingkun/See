@@ -312,6 +312,43 @@ def api_gw_samples():
     return jsonify(ok=True, n=n)
 
 
+@app.route('/api/gw/devices', methods=['OPTIONS', 'GET'])
+def api_gw_devices():
+    """监控页数据源：采集器最近一轮的设备快照。
+
+    手机端不再登网关，监控页改成读这份数据（网页/app 同一份口径）。
+    """
+    if request.method == 'OPTIONS':
+        resp = jsonify(ok=True)
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        resp.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+        resp.headers['Access-Control-Allow-Headers'] = 'Content-Type, X-See-Key'
+        return resp
+    if not _cfg_auth():
+        return jsonify(ok=False, error='unauthorized'), 401
+    now = int(time.time())
+    try:
+        devs = store.gw_latest(now - 900)
+    except Exception as e:  # noqa: BLE001
+        return jsonify(ok=False, error='读取采样失败：%s' % str(e)[:120]), 500
+    try:
+        links = store.gw_last_link()
+    except Exception:  # noqa: BLE001
+        links = {}
+    for d in devs:
+        if not d.get('link'):
+            d['link'] = links.get(d['key'], '')
+    wired = [d for d in devs if d.get('link') == 'wired']
+    wireless = [d for d in devs if d.get('link') == 'wifi']
+    age = (now - max([d['ts'] for d in devs])) if devs else -1
+    totals = {
+        'wdown': sum(d['down'] for d in wired), 'wup': sum(d['up'] for d in wired),
+        'wldown': sum(d['down'] for d in wireless), 'wlup': sum(d['up'] for d in wireless),
+        'wired': len(wired), 'wireless': len(wireless),
+    }
+    return jsonify(ok=True, ts=now, age=age, src='collector', devices=devs, totals=totals)
+
+
 @app.route('/api/gw/keys', methods=['OPTIONS', 'GET'])
 def api_gw_keys():
     if request.method == 'OPTIONS':
