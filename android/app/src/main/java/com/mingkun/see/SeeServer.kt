@@ -99,6 +99,8 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
     }
 
     @Volatile private var gwLoginTs = 0L
+    @Volatile private var gwHttp = 0      // 最近一次网关响应的 HTTP 状态码
+    @Volatile private var gwLen = 0       // 最近一次网关响应的字节数
     @Volatile private var gwLoginIp = ""
     @Volatile private var lastRecTs = 0L
     @Volatile private var lastPruneTs = 0L
@@ -128,13 +130,17 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
             val stale = (System.currentTimeMillis() - gwLoginTs > 120000L) || gwLoginIp != ip
             if (stale) gwLogin(ip, user, pw)
             var txt = gwGet(ip, "/cgi-bin/luci/admin/allInfo")
-            if (!txt.trimStart().startsWith("{")) {
+            var tries = 0
+            while (!txt.trimStart().startsWith("{") && tries < 2) {
+                tries++
                 gwLogin(ip, user, pw)
                 txt = gwGet(ip, "/cgi-bin/luci/admin/allInfo")
             }
             if (!txt.trimStart().startsWith("{")) {
                 newFixedLengthResponse(Status.OK, "application/json",
-                    JSONObject().put("ok", false).put("error", "登录未成功，请检查账号与密码").toString())
+                    JSONObject().put("ok", false)
+                        .put("error", if (gwHttp == 0) "网关无响应" else "登录未成功，请检查账号与密码")
+                        .put("http", gwHttp).put("len", gwLen).put("snip", snippet(txt)).toString())
             } else {
                 val j = JSONObject(txt)
                 val arr = JSONArray()
@@ -169,7 +175,9 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
             }
         } catch (e: Exception) {
             newFixedLengthResponse(Status.OK, "application/json",
-                JSONObject().put("ok", false).put("error", (e.message ?: "err").take(120)).toString())
+                JSONObject().put("ok", false)
+                    .put("error", "网关连不上（" + e.javaClass.simpleName + "）")
+                    .put("snip", (e.message ?: "").take(60)).toString())
         }
     }
 
@@ -198,8 +206,18 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
         conn.connectTimeout = 4000
         conn.readTimeout = 6000
         conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14)")
-        val s = if (conn.responseCode >= 400) conn.errorStream else conn.inputStream
-        return s?.bufferedReader()?.readText() ?: ""
+        val code = conn.responseCode
+        val s = if (code >= 400) conn.errorStream else conn.inputStream
+        val t = s?.bufferedReader()?.readText() ?: ""
+        gwHttp = code
+        gwLen = t.length
+        return t
+    }
+
+    /** 页面给用户看的短摘要：剥离 HTML 标签与空白 */
+    private fun snippet(t: String): String {
+        val s = t.replace(Regex("<[^>]*>"), " ").replace(Regex("\\s+"), " ").trim()
+        return s.take(60)
     }
 
     /** 每次拉取网关后落采样：在场记实时速率，不在场记 present=0（休眠/离线） */
@@ -314,7 +332,7 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
             online = scanner.devices.values.count { it.online }
         }
         val o = JSONObject()
-        o.put("ok", true); o.put("mode", "observer"); o.put("iface", "wifi"); o.put("ver", "2.49"); o.put("vercode", 60)
+        o.put("ok", true); o.put("mode", "observer"); o.put("iface", "wifi"); o.put("ver", "2.50"); o.put("vercode", 61)
         o.put("subnet", scanner.subnet); o.put("ip", phoneIp)
         o.put("uptime", System.currentTimeMillis() / 1000 - scanner.startTs)
         o.put("online", online); o.put("devices", total)

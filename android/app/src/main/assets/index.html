@@ -758,7 +758,11 @@ function gwTick(){
     .then(function(j){
       var b = document.getElementById('gwBody'), s = document.getElementById('gwSum'), e = document.getElementById('gwErr');
       if (!j || !j.ok) {
-        if (e) e.textContent = '❌ ' + ((j && j.error) || '拉取失败');
+        if (e) {
+          var det = (j && (j.http || j.len || j.snip))
+            ? ' [HTTP ' + (j.http || 0) + ' · ' + (j.len || 0) + 'B' + (j.snip ? ' · ' + j.snip : '') + ']' : '';
+          e.textContent = '❌ ' + ((j && j.error) || '拉取失败') + det;
+        }
         if (b) b.innerHTML = '<tr><td colspan="6" class="hint">—</td></tr>';
         if (s) s.textContent = '';
         return;
