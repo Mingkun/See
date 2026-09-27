@@ -10,12 +10,12 @@
 # 它会：下载脚本 -> 装到 /opt/see -> 自动取密钥写 /etc/see/api-key(600)
 #      -> 自检三项 -> 装 systemd 服务并启动
 set -e
+BASE="https://5130599.best/see/downloads/collector"
+API="https://5130599.best/see"
 
 # 自动判断要不要 sudo：已经是 root、或没装 sudo 时不加前缀（LightOS 实例里常见）
 if [ "$(id -u)" = "0" ] || ! command -v sudo >/dev/null 2>&1; then SUDO=""; else SUDO="sudo"; fi
 echo "==> 当前用户 $(id -un) (uid=$(id -u))，sudo 前缀: '${SUDO:-无}'"
-BASE="https://5130599.best/see/downloads/collector"
-API="https://5130599.best/see"
 
 # 下载函数：先按默认参数试，失败再强制 IPv4 + TLS1.2（NAT/中间设备常把 TLS1.3 谈崩）
 dl() {
@@ -38,8 +38,15 @@ $SUDO install -m 755 see_collector.py /opt/see/see_collector.py
 
 echo "==> [3/6] 取密钥写入 /etc/see/api-key（从 see 网页读取，不经过命令行参数）"
 dl "$API/" homepage.html
-KEY="$(grep -o "SEE_KEY = '***']*'" homepage.html | head -1 | cut -d"'" -f2)"
-if [ -z "$KEY" ]; then echo "!! 取密钥失败，检查能否访问 $API/"; exit 1; fi
+KEY="$(grep -m1 'SEE_KEY' homepage.html | cut -d\' -f2)"
+KEY="$(printf '%s' "$KEY" | tr -d ' \r\n')"
+if [ -z "$KEY" ]; then
+  echo "!! 取密钥失败，诊断信息："
+  echo "   下载字节数: $(wc -c < homepage.html)"
+  echo "   含 SEE_KEY 的行数: $(grep -c SEE_KEY homepage.html || true)"
+  echo "   文件开头 300 字节:"; head -c 300 homepage.html; echo
+  exit 1
+fi
 printf '%s' "$KEY" | $SUDO tee /etc/see/api-key >/dev/null
 $SUDO chmod 600 /etc/see/api-key
 echo "    密钥长度 ${#KEY}，已写入（不回显内容）"
