@@ -77,6 +77,8 @@
   .hint { display:block; font-size:var(--fs-sm); line-height:1.5; color:var(--muted); padding:10px var(--pad-x); }
   .center-note { display:block; text-align:center; font-size:var(--fs-sm); color:var(--muted); padding:10px var(--pad-x); }
   .sec { font-size:var(--fs-sm); font-weight:700; letter-spacing:.4px; color:var(--muted); margin:var(--sp-4) 0 var(--sp-2); }
+  /* 网页版隐藏安卓专属入口（app 内由 SeeBridge 提供） */
+  body.web .app-only { display:none; }
   .sec:first-child { margin-top:0; }
   .h2 { font-size:var(--fs-lg); font-weight:650; }
   .link { display:inline-block; margin-top:var(--sp-1); font-size:var(--fs-md); color:var(--brand); }
@@ -255,7 +257,7 @@
     <div id="gwOut" class="sub mt-2"></div>
     <div class="sec">后台保活</div>
     <div class="sub ml-0 mt-1">开启实时设备后，本机前台服务会持续采集并上传服务器（关掉界面也继续）；开机后会自动恢复。</div>
-    <div class="row mt-2">
+    <div class="row mt-2 app-only">
       <button type="button" onclick="battery()" class="btn">🔋 电池白名单</button>
       <button type="button" onclick="appSettings()" class="btn">⚙ 系统设置（自启动）</button>
     </div>
@@ -270,6 +272,8 @@
   <button id="tabAn" type="button" onclick="seeTab('an')" class="tab"><span class="sym">📈</span>分析</button>
 </div>
 <script>
+/* 非安卓环境（公网网页版）标记为 web：隐藏安卓专属入口，仍走同一份页面 */
+try { if (!window.SeeBridge) document.body.classList.add('web'); } catch (e) {}
 function seeTab(w){
   document.getElementById('viewMon').style.display = w==='mon' ? '' : 'none';
   document.getElementById('viewObs').style.display = w==='obs' ? '' : 'none';
