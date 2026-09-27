@@ -51,16 +51,27 @@ echo "==> [3/7] 安装到 /opt/see"
 $SUDO mkdir -p /opt/see /etc/see
 $SUDO install -m 755 see_collector.py /opt/see/see_collector.py
 
-echo "==> [4/7] 取密钥写入 /etc/see/api-key（从 see 网页读取，不经过命令行参数）"
-dl "$API/" homepage.html
-KEY="$(grep -m1 'SEE_KEY' homepage.html | cut -d\' -f2)"
-KEY="$(printf '%s' "$KEY" | tr -d ' \r\n')"
-if [ -z "$KEY" ]; then
-  echo "!! 取密钥失败，诊断信息："
-  echo "   下载字节数: $(wc -c < homepage.html)"
-  echo "   含 SEE_KEY 的行数: $(grep -c SEE_KEY homepage.html || true)"
-  echo "   文件开头 300 字节:"; head -c 300 homepage.html; echo
-  exit 1
+echo "==> [4/7] 写入 /etc/see/api-key（采集器密钥）"
+# 密钥不再放在公开网页里了（那是以前的安全漏洞）。三种来源，都不会进命令行参数：
+#   1) 环境变量 SEE_KEY（适合自动化）   2) 已有的 /etc/see/api-key（重跑时复用）
+#   3) 交互输入（默认，不回显）
+KEY="${SEE_KEY:-}"
+if [ -z "$KEY" ] && $SUDO test -s /etc/see/api-key; then
+  KEY="$($SUDO cat /etc/see/api-key 2>/dev/null || true)"
+  [ -n "$KEY" ] && echo "    复用已有的 /etc/see/api-key"
+fi
+while [ -z "$KEY" ]; do
+  echo "    请粘贴「采集器密钥」后回车（输入不回显）："
+  echo "    位置：https://5130599.best/see/ → ⚙ 设置 → 访问与安全 → 采集器密钥（需先登录）"
+  if [ -t 0 ]; then
+    printf '    密钥: '; read -r -s KEY < /dev/tty || KEY=""; echo
+  else
+    echo "!! 非交互环境：请改用 SEE_KEY=xxx bash install.sh，或先登录网页取密钥"; exit 1
+  fi
+  KEY="$(printf '%s' "$KEY" | tr -d ' \r\n')"
+done
+if [ ${#KEY} -lt 16 ]; then
+  echo "!! 密钥长度 ${#KEY}，看着不对（正常 32 位十六进制），请重新复制再跑"; exit 1
 fi
 printf '%s' "$KEY" | $SUDO tee /etc/see/api-key >/dev/null
 $SUDO chmod 600 /etc/see/api-key

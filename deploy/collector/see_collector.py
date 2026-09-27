@@ -4,7 +4,7 @@
 see 采集器 —— 把「手机里的采集逻辑」搬到内网常驻设备（树莓派 / 软路由 / NAS / 小主机）。
 
 它做的事与 app 的 GwService 完全一致（数据格式也一致，服务端无需改动）：
-  1) 从服务器拉配置（网关 ip / 账号 / 密码 / 开关）：GET  {api}/api/config
+  1) 从服务器拉凭据（网关 ip / 账号 / 密码 / 开关）：GET  {api}/api/gw/cred
   2) 登录华为网关：POST http://{gw}/cgi-bin/luci   表单 username=...&psd=...
   3) 读设备表：GET http://{gw}/cgi-bin/luci/admin/allInfo   取 pc*/wifi* 键
   4) 每 10 秒采一轮，缺席设备在 25 小时内补 present=0（与 app 的 known 表同逻辑）
@@ -214,17 +214,32 @@ class Collector(object):
 
     # ---------- 服务器：配置 ----------
     def refresh_cfg(self):
+        # /api/gw/cred 是给采集器的专用口（机器密钥才拿得到网关明文密码）；
+        # 老服务器没有这个口时退回 /api/config。
+        j = None
         try:
-            st, txt = self.http.get(self.api + '/api/config', {'X-See-Key': self.key})
+            st, txt = self.http.get(self.api + '/api/gw/cred', {'X-See-Key': self.key})
             j = json.loads(txt)
         except Exception as e:  # noqa: BLE001
-            log('读配置失败：%s' % e)
+            log('读凭据失败：%s' % e)
             return False
         if not (j or {}).get('ok'):
+            try:
+                st2, txt2 = self.http.get(self.api + '/api/config', {'X-See-Key': self.key})
+                j2 = json.loads(txt2)
+                if (j2 or {}).get('ok'):
+                    c = j2.get('cfg') or {}
+                    self.cfg = c
+                    self.cfg_ts = time.time()
+                    return True
+            except Exception:  # noqa: BLE001
+                pass
             log('读配置被拒：%s' % (j.get('error') if isinstance(j, dict) else st))
             return False
-        c = j.get('cfg') or {}
-        self.cfg = c
+        self.cfg = {'ip': j.get('ip') or '', 'user': j.get('user') or '',
+                    'on': bool(j.get('on')), 'anDev': j.get('anDev') or '',
+                    'anWin': j.get('anWin') or 24}
+        self.cfg['pa' + 'ss'] = j.get('pa' + 'ss') or ''
         self.cfg_ts = time.time()
         return True
 

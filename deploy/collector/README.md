@@ -39,7 +39,7 @@
 
 1. 微服客户端 → 应用商店 → 搜索安装 **LightOS**，创建一个实例。
 2. 从 LightOS 页面打开实例终端（WebShell）。
-3. 把脚本传进去（`scp`、粘贴均可），密钥写到 `/etc/see/api-key`，然后：
+3. 把脚本传进去（`scp`、粘贴均可），密钥写到 `/etc/see/api-key`（密钥来源见下方「去哪拿密钥」），然后：
    ```bash
    sudo mkdir -p /opt/see && sudo cp see_collector.py /opt/see/
    echo '<你的 SEE_KEY>' | sudo tee /etc/see/api-key >/dev/null && sudo chmod 600 /etc/see/api-key
@@ -81,7 +81,7 @@ sudo mkdir -p /opt/see /etc/see
 sudo cp see_collector.py /opt/see/
 sudo chmod 755 /opt/see/see_collector.py
 
-# 2) 写密钥文件（密钥就是网页里那份 data/api-key.txt 的内容）
+# 2) 写密钥文件（密钥：登录 see 网页 → ⚙ 设置 → 访问与安全 → 「采集器密钥」）
 echo '<你的 SEE_KEY>' | sudo tee /etc/see/api-key >/dev/null
 sudo chmod 600 /etc/see/api-key
 

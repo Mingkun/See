@@ -301,6 +301,13 @@
     </div>
     <div id="gwOut" class="sub mt-2"></div>
     </div>
+    <div class="sec">访问与安全</div>
+    <div class="sub ml-0 mt-1">采集器密钥只给家里的微服用（装采集器时填）。别外传，也别贴到聊天里。</div>
+    <div class="row mt-2">
+      <input id="mcKey" class="inp w200" readonly placeholder="登录后显示">
+      <button type="button" onclick="copyMc()" class="btn">📋 复制</button>
+      <button type="button" onclick="doLogout()" class="btn ghost">🚪 退出登录</button>
+    </div>
     <div class="sec">客户端下载</div>
     <a href="https://5130599.best/see/downloads/see-android.apk" class="link">⬇ 最新版 APK（浏览器打开）</a>
   </div>
@@ -589,7 +596,73 @@ var GW = { ip: '192.168.1.1', user: 'useradmin', on: false, timer: null, fails: 
            sort: { k: 'speed', d: -1 }, last: [] };   // 默认按总速率降序（原行为）
 GW['pa' + 'ss'] = '';
 var CFG_URL = 'https://5130599.best/see/api/config';
-var SEE_KEY = 'e3d6bf27b00815b9aca0a5933cefbed1';
+var API = 'https://5130599.best/see/api';
+// 页面里不再内嵌任何密钥：改用「口令换来的会话令牌」，存在本机 localStorage。
+function sess(){ try { return localStorage.getItem('seeSess') || ''; } catch(e) { return ''; } }
+function setSess(v){ try { v ? localStorage.setItem('seeSess', v) : localStorage.removeItem('seeSess'); } catch(e) {} }
+function apiFetch(url, opts){
+  opts = opts || {};
+  var h = opts.headers || {};
+  if (sess()) h['X-See-Session'] = sess();
+  opts.headers = h;
+  return fetch(url, opts).then(function(r){
+    if (r.status === 401) { setSess(''); showLogin(); }
+    return r;
+  });
+}
+function showLogin(){ var m = document.getElementById('loginMask'); if (m) m.style.display = 'flex'; }
+function hideLogin(){ var m = document.getElementById('loginMask'); if (m) m.style.display = 'none'; }
+function loginMode(need){
+  var h = document.getElementById('loginHint'), b = document.getElementById('loginBtn'), ti = document.getElementById('loginTitle');
+  if (ti) ti.textContent = need ? '首次设置访问口令' : 'see 需要登录';
+  if (h) h.textContent = need ? '这个口令是网页和 App 的钥匙，设好之后请记牢（至少 6 位）。' : '请输入访问口令。';
+  if (b) b.textContent = need ? '设置并进入' : '登录';
+  var el = document.getElementById('loginMask'); if (el) el.setAttribute('data-need', need ? '1' : '');
+}
+function doLogin(){
+  var i = document.getElementById('loginPass'), e = document.getElementById('loginErr');
+  var pw = (i && i.value) || '';
+  var need = document.getElementById('loginMask').getAttribute('data-need') === '1';
+  if (e) e.textContent = '';
+  fetch(API + (need ? '/setup' : '/login'), {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pass: pw })
+  }).then(function(r){ return r.json().then(function(j){ return { s: r.status, j: j }; }); })
+    .then(function(o){
+      if (o.j && o.j.ok && o.j.token){ setSess(o.j.token); if (i) i.value = ''; hideLogin(); boot(); return; }
+      if (e) e.textContent = (o.j && o.j.error) || ('失败 HTTP ' + o.s);
+    }).catch(function(){ if (e) e.textContent = '网络错误'; });
+}
+function doLogout(){
+  apiFetch(API + '/logout', { method: 'POST' }).catch(function(){});
+  setSess(''); showLogin(); loginMode(false);
+}
+function checkSession(){
+  return fetch(API + '/session').then(function(r){ return r.json(); }).then(function(j){
+    if (j && j.authed){ hideLogin(); }
+    else { loginMode(!!(j && j.need_setup)); showLogin(); }
+    return j;
+  }).catch(function(){ return {}; });
+}
+function copyMc(){
+  var el = document.getElementById('mcKey');
+  if (!el || !el.value) return;
+  try {
+    el.removeAttribute('readonly'); el.select(); document.execCommand('copy'); el.setAttribute('readonly','readonly');
+  } catch(e) { try { navigator.clipboard.writeText(el.value); } catch(e2) {} }
+  var o = document.getElementById('gwOut'); if (o) o.textContent = '密钥已复制（别贴到聊天里）';
+}
+function boot(){
+  gwLoad(); loadStatus(); loadDevices(); loadEvents(); anInit();
+  loadMcKey();
+}
+// 登录后把采集器要用的机器密钥取回来，方便复制到微服安装脚本里
+function loadMcKey(){
+  apiFetch(API + '/machine-key').then(function(r){ return r.json(); }).then(function(j){
+    var el = document.getElementById('mcKey');
+    if (el && j && j.ok) el.value = j.key || '';
+  }).catch(function(){});
+}
 function gwApply(cfg){
   if (!cfg) return;
   if (cfg.ip) GW.ip = cfg.ip;
@@ -608,7 +681,7 @@ function gwLoad(){
   // 先用本地缓存即时生效，再向服务器拉取统一配置覆盖
   try { gwApply(JSON.parse(localStorage.getItem('gwCfg') || '{}')); } catch(e) {}
   gwBoot();
-  fetch(CFG_URL, { headers: { 'X-See-Key': SEE_KEY } })
+  apiFetch(CFG_URL, {})
     .then(function(r){ return r.json(); })
     .then(function(j){
       if (!j || !j.ok) return;
@@ -621,9 +694,9 @@ function gwPush(){
   try {
     var body = { ip: GW.ip, user: GW.user, on: !!GW.on };
     body['pa' + 'ss'] = GW['pa' + 'ss'];
-    fetch(CFG_URL, {
+    apiFetch(CFG_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-See-Key': SEE_KEY },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     }).then(function(r){ return r.json(); }).then(function(j){
       var o = document.getElementById('gwOut');
@@ -815,7 +888,7 @@ function gwPaint(){
 }
 function gwTick(){
   // 数据源 = 服务器（微服采集器写的快照），不再由手机登网关
-  fetch('https://5130599.best/see/api/gw/devices', { headers: { 'X-See-Key': SEE_KEY } })
+  apiFetch(API + '/gw/devices', {})
     .then(function(r){ return r.json(); })
     .then(function(j){
       var b = document.getElementById('gwBody'), s = document.getElementById('gwSum'), e = document.getElementById('gwErr');
@@ -919,14 +992,14 @@ function anWinLabel(){
 // 选择结果写回后台（服务器端 data/gw-config.json），下次打开自动恢复
 function anSaveSel(){
   try {
-    fetch(CFG_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-See-Key': SEE_KEY },
+    apiFetch(CFG_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ anDev: AN.key, anWin: AN.win }) });
   } catch (e) {}
 }
 function anInit(){
   anWinItems();
   // 先恢复上次选择（服务器端持久化），再拉设备列表
-  fetch(CFG_URL, { headers: { 'X-See-Key': SEE_KEY } })
+  apiFetch(CFG_URL, {})
     .then(function(r){ return r.json(); })
     .then(function(j){
       var c = (j && j.cfg) || {};
@@ -937,7 +1010,7 @@ function anInit(){
     .then(function(){ anWinLabel(); anKeys(); });
 }
 function anKeys(){
-  fetch('https://5130599.best/see/api/gw/keys?days=7&key=' + encodeURIComponent(SEE_KEY))
+  apiFetch(API + '/gw/keys?days=7')
     .then(function(r){ return r.json(); })
     .then(function(j){
       var lab = document.getElementById('anDevLab');
@@ -964,7 +1037,7 @@ function anLoad(){
   var hrs = AN.win || 24;
   if (!AN.key) { document.getElementById('anSub').textContent = '请选择设备'; return; }
   document.getElementById('anSub').textContent = '加载中…';
-  fetch('https://5130599.best/see/api/gw/series?key=' + encodeURIComponent(SEE_KEY) + '&dev=' + encodeURIComponent(AN.key) + '&hours=' + hrs)
+  apiFetch(API + '/gw/series?dev=' + encodeURIComponent(AN.key) + '&hours=' + hrs)
     .then(function(r){ return r.json(); })
     .then(function(j){ if (!j || !j.ok) { document.getElementById('anSub').textContent = '❌ ' + ((j && j.error) || '失败'); return; } anRender(j); })
     .catch(function(){ document.getElementById('anSub').textContent = '服务器连接失败'; });
@@ -1062,7 +1135,16 @@ function anRender(j){
   document.getElementById('anLegend').innerHTML = '采样覆盖 ' + (cover / n * 100).toFixed(0) + '%（' + anFmtDur(cover) + '） · 休眠/空闲 ' + runs.length + ' 段 · 空闲阈值 ' + fmtSpeed(AN_THR);
   document.getElementById('anHint').textContent = '数据来自 app 运行期间对网关的采样（每 10 秒 1 次），app 关闭期间不采集；曲线为 5 分钟一格的速率均值。';
 }
-gwLoad();
+checkSession().then(function(){ boot(); });
 </script>
+<div id="loginMask" style="display:none;position:fixed;inset:0;z-index:99;background:rgba(0,0,0,.55);align-items:center;justify-content:center">
+  <div class="panel" style="max-width:340px;margin:0 16px">
+    <div class="h2" id="loginTitle">see 需要登录</div>
+    <div class="sub ml-0 mt-1" id="loginHint">请输入访问口令。</div>
+    <input id="loginPass" type="password" class="inp mt-2" placeholder="访问口令" autocomplete="current-password">
+    <div class="row mt-2"><button type="button" id="loginBtn" onclick="doLogin()" class="btn primary">登录</button></div>
+    <div class="sub c-danger mt-1" id="loginErr"></div>
+  </div>
+</div>
 </body>
 </html>
