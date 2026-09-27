@@ -14,12 +14,58 @@
 
 ## 硬件怎么选
 
-1. **首选：树莓派 4B/5（2GB）+ 有线接主网关 LAN 口** —— 稳、有千兆网口、功耗 3~5W。
+0. **手里已经有懒猫微服 → 直接用它（0 元，见下节）**，不用再买。
+1. **树莓派 4B/5（2GB）+ 有线接主网关 LAN 口** —— 稳、有千兆网口、功耗 3~5W。
    树莓派 Zero 2 W 也行，但**没有网口**，要么 USB 网卡要么只用 WiFi，不推荐做长期采集。
 2. **更便宜：GL.iNet 之类自带 OpenWrt 的小路由**（MT3000/MT2500 等） —— 有网口、常开、能跑 Python，体积小。
-3. **最省：先看看现有 NAS 能不能用** —— 家里有华为 AS6020（`192.168.1.15`）。
-   若它允许 SSH / Docker，就 0 元，直接把它当采集器。华为 NAS 一般比较封闭，**先确认再买**。
+3. **看看现有 NAS 能不能用** —— 家里有华为 AS6020（`192.168.1.15`）。
+   若它允许 SSH / Docker，就 0 元。华为 NAS 一般比较封闭，**先确认再买**。
 4. **顺带升级：N100 小主机** —— 既当采集器又能当软路由/旁路由。
+
+## 懒猫微服（推荐：已有设备直接用）
+
+懒猫微服（LazyCat，跑 lzcos）本身完全够用，但它有个**必须绕开的坑**：
+
+> ⚠️ **lzcos 的 SSH 环境是 read-only 系统**，官方明确写「重启后通过 SSH 对系统做的变动会丢失」、
+> 「不适合用来直接安装系统软件提供服务」。
+> **所以别直接 SSH 进微服装脚本/服务 —— 重启就没了。**
+
+正确姿势是用 **LightOS**（微服应用商店里的入口应用）：它建的实例是**完整、持久的 Linux 环境**，
+官方就是拿它替代「直接 SSH 装软件」这条路的。
+
+### 路线 A：LightOS 实例里直接跑（最省事）
+
+1. 微服客户端 → 应用商店 → 搜索安装 **LightOS**，创建一个实例。
+2. 从 LightOS 页面打开实例终端（WebShell）。
+3. 把脚本传进去（`scp`、粘贴均可），密钥写到 `/etc/see/api-key`，然后：
+   ```bash
+   sudo mkdir -p /opt/see && sudo cp see_collector.py /opt/see/
+   echo '<你的 SEE_KEY>' | sudo tee /etc/see/api-key >/dev/null && sudo chmod 600 /etc/see/api-key
+   python3 /opt/see/see_collector.py --key-file /etc/see/api-key --selfcheck   # 先自检
+   ```
+4. 自检三项都 ✓ 后，装成服务常驻（LightOS 实例是完整 Linux，systemd 可用）：
+   ```bash
+   sudo cp see-collector.service /etc/systemd/system/ && sudo systemctl daemon-reload
+   sudo systemctl enable --now see-collector
+   ```
+
+### 路线 B：LightOS 里用 Docker（官方推荐给自用服务）
+
+```bash
+# 在 LightOS 实例内
+echo '<你的 SEE_KEY>' > api-key && chmod 600 api-key
+# 把 Dockerfile / docker-compose.yml / see_collector.py 放到同一目录
+docker compose up -d
+docker compose logs -f
+```
+
+> 需要「微服网络里跑 Docker」时官方明确指向 **Docker in LightOS**，不要在 lzcos 上折腾。
+
+### 顺带确认两件事
+
+- **位置**：微服要接在**主网关同一层网**（LAN 口），能访问 `192.168.1.1`。
+  如果它现在挂在级联路由下面，要么换口，要么等 AP 模式改造。
+- **架构**：采集器是纯标准库 Python，ARM / x86 都跑，不用装 pip 包。
 
 > ⚠️ **位置比型号重要**：采集设备必须和**主网关同一个二层网络**（`192.168.1.x`），
 > 接在主网关的 LAN 口/交换机上。如果家里还留着级联路由（双重 NAT），

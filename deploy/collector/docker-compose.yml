@@ -1,0 +1,24 @@
+# 懒猫微服（LightOS 内的 Docker）/ 任意 Docker 主机
+#
+# 用法：
+#   1) 把密钥写进同目录 api-key 文件（不要写进这个 yml）：
+#        echo '<你的 SEE_KEY>' > api-key && chmod 600 api-key
+#   2) docker compose up -d
+#   3) docker compose logs -f
+#
+# 注意：容器需要能访问你家网关 (192.168.1.1)，所以用 host 网络最省事，
+#       也顺带避免 NAT 造成的网段错位。
+services:
+  see-collector:
+    build: .
+    image: see-collector:latest
+    container_name: see-collector
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      SEE_API: https://5130599.best/see
+      SEE_KEY_FILE: /etc/see/api-key
+    volumes:
+      - ./api-key:/etc/see/api-key:ro
+    # 想覆盖服务器里的网关配置（一般不需要，配置优先从服务器读）：
+    # command: ["--interval", "10", "--upload-every", "60"]
