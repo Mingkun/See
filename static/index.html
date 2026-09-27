@@ -80,6 +80,7 @@
   .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:#cbd5e1; }
   .dot.on { background:#22c55e; box-shadow:0 0 6px #22c55e; }
   .name { font-weight:600; }
+  .me { color:#2563eb; font-weight:650; }   /* 本机（识别得到时标蓝） */
   .num { font-variant-numeric:tabular-nums; white-space:nowrap; }
   .dn { color:var(--brand); } .up { color:var(--warn); }
 
@@ -345,6 +346,8 @@ function seeTab(w){
 
 <script>
 var curIp = '';
+var SELF_IP = '';   // 本机在局域网里的 IP（来自本机 SeeServer 的 /api/status），用于把本机设备名标蓝
+function isSelf(x){ var ip = String((x && (x.ip || x.key)) || ''); return !!SELF_IP && ip === SELF_IP; }
 function esc(s){ var d=document.createElement('div'); d.textContent=s==null?'':String(s); return d.innerHTML; }
 function escA(s){ return esc(s).replace(/"/g, '&quot;'); }
 // 设备名称限长：最多 n 个字符（中文按 1 个字算），超出用「…」占位，保证显示宽度不超过 n
@@ -375,6 +378,7 @@ function doScan(){
 function loadStatus(){
   fetch('api/status').then(function(r){return r.json()}).then(function(d){
     if(!d||!d.ok) return;
+    if (d.ip) SELF_IP = String(d.ip);
     document.getElementById('netInfo').textContent = '手机IP '+d.ip+' · 网段 '+d.subnet+' · 观察模式（接入/在线）'+(d.scan_error?' · '+d.scan_error:'')+'；同一WiFi其他设备可访问 http://'+(d.ip||'手机IP')+':5050/';
   }).catch(function(){});
 }
@@ -388,7 +392,7 @@ function loadDevices(){
     d.devices.forEach(function(v){
       html+='<tr class="dev'+(SEL_IP && selOf(v) === SEL_IP ? ' pinned' : '')+'" data-ip="'+esc(v.ip)+'">'
         +'<td><span class="dot'+(v.online?' on':'')+'"></span></td>'
-        +'<td><div class="name" title="'+escA(v.hostname||v.type||v.ip)+'">'+esc(cutName(v.hostname||v.type||v.ip, 12))+'</div><div class="sub">'+esc([v.ip, v.hostname?(v.type||''):'', v.mac].filter(Boolean).join(' · '))+'</div></td>'
+        +'<td><div class="name" title="'+escA(v.hostname||v.type||v.ip)+'">'+(isSelf(v)?'<span class="me">':'')+esc(cutName(v.hostname||v.type||v.ip, 12))+(isSelf(v)?'</span>':'')+'</div><div class="sub">'+esc([v.ip, v.hostname?(v.type||''):'', v.mac].filter(Boolean).join(' · '))+'</div></td>'
         +'<td class="num sub">'+esc(fmtAgo(v.last_seen))+'</td></tr>';
     });
     b.innerHTML=html;
@@ -418,7 +422,9 @@ function loadDetail(){
   fetch('api/device?ip='+encodeURIComponent(curIp)).then(function(r){return r.json()}).then(function(d){
     if(!d||!d.ok) return;
     var v=d.device;
-    document.getElementById('dTitle').textContent=v.hostname||v.ip;
+    var dt=document.getElementById('dTitle');
+    dt.textContent=v.hostname||v.ip;
+    dt.className = 'h2' + (isSelf(v) ? ' me' : '');
     document.getElementById('dInfo').textContent=(v.type?v.type+' · ':'')+v.ip+' · '+v.mac
       +(v.vendor?' · '+v.vendor:'')+(v.online?' · 在线':' · 离线')+' · 最近活跃 '+fmtAgo(v.last_seen);
   }).catch(function(){});
@@ -858,7 +864,7 @@ function gwPaint(){
     b.innerHTML = ds.map(function(d){
       return '<tr' + (SEL_IP && selOf(d) === SEL_IP ? ' class="pinned"' : '') + '>'
         + '<td class="sub">' + gwLink(d) + '</td>'
-        + '<td><div class="name" title="' + escA(d.name || d.ip) + '">' + esc(cutName(d.name || d.ip, 12)) + '</div><div class="sub">' + esc(d.ip) + '</div></td>'
+        + '<td><div class="name" title="' + escA(d.name || d.ip) + '">' + (isSelf(d) ? '<span class="me">' : '') + esc(cutName(d.name || d.ip, 12)) + (isSelf(d) ? '</span>' : '') + '</div><div class="sub">' + esc(d.ip) + '</div></td>'
         + '<td class="num dn">' + fmtSpeed(d.down) + '</td>'
         + '<td class="num up">' + fmtSpeed(d.up) + '</td>'
         + '<td class="sub">' + esc(gwDur(d.online_time)) + '</td></tr>';
@@ -943,10 +949,16 @@ window.addEventListener('scroll', function(ev){
 window.addEventListener('resize', ddCloseAll);
 document.addEventListener('click', ddCloseAll);
 function anDevLabel(k){ return (k.name || k.ip || k.key) + (k.name && k.ip ? ' · ' + k.ip : ''); }
+function anDevLabelHtml(k){
+  var nm = esc(k.name || k.ip || k.key || '');
+  var tail = (k.name && k.ip) ? ' · ' + esc(k.ip) : '';
+  if (isSelf(k)) nm = '<span class="me">' + nm + '</span>';
+  return nm + tail;
+}
 function anDevItems(){
   var pop = document.getElementById('anDevPop'); if (!pop) return;
   pop.innerHTML = (AN.devs || []).map(function(k, i){
-    return '<div class="ddopt' + (k.key === AN.key ? ' on' : '') + '" onclick="anPickDev(' + i + ')">' + esc(anDevLabel(k)) + '</div>';
+    return '<div class="ddopt' + (k.key === AN.key ? ' on' : '') + '" onclick="anPickDev(' + i + ')">' + anDevLabelHtml(k) + '</div>';
   }).join('');
 }
 function anWinItems(){
@@ -959,7 +971,7 @@ function anPickDev(i){
   var k = (AN.devs || [])[i]; if (!k) return;
   AN.key = k.key;
   SEL_IP = String(k.key || k.ip || '');
-  var lab = document.getElementById('anDevLab'); if (lab) lab.textContent = anDevLabel(k);
+  var lab = document.getElementById('anDevLab'); if (lab) lab.innerHTML = anDevLabelHtml(k);
   anDevItems(); ddCloseAll(); anSaveSel(); anLoad();
 }
 function anPickWin(i){
@@ -1011,7 +1023,7 @@ function anKeys(){
       for (var i = 0; i < ks.length; i++) if (ks[i].key === AN.key) { cur = ks[i]; break; }
       if (!cur) cur = ks[0];
       AN.key = cur.key;
-      if (lab) lab.textContent = anDevLabel(cur);
+      if (lab) lab.innerHTML = anDevLabelHtml(cur);
       anDevItems();
       anLoad();
     }).catch(function(){ document.getElementById('anSub').textContent = '服务器设备列表读取失败'; });
