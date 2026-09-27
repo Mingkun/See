@@ -59,6 +59,8 @@
   /* 图标格跟设备名那一行走：默认 middle 会卡在「名称+IP」两行中间，跟谁都对不齐 */
   .tbl-dense td:first-child { vertical-align:top; padding-top:7px; line-height:15.5px; }
   .ico { display:inline-block; font-size:12px; line-height:15.5px; }
+  .ico svg { width:12.5px; height:12.5px; display:inline-block; vertical-align:-1.5px; }
+  .bdg { font-weight:600; }
   #gwPanel .pt { font-size:var(--fs-sm); }
   #gwPanel .pt .sub { font-size:var(--fs-xs); }
   .celltight { padding-top:0; padding-bottom:10px; }
@@ -723,6 +725,73 @@ function gwDur(s){
   if (s < 86400) return Math.floor(s / 3600) + '时' + Math.floor((s % 3600) / 60) + '分';
   return Math.floor(s / 86400) + '天' + Math.floor((s % 86400) / 3600) + '时';
 }
+/* ---- 设备识别：品牌 + 形态 ---- */
+var BRANDS = [
+  { n:'Apple',   c:'#0f172a', m:'apple',  k:['iphone','ipad','macbook','imac','apple','airpods'] },
+  { n:'华为',    c:'#cf0a2c', m:'huawei', k:['华为','huawei','honor','荣耀','optixstar','optistar','mate ','pura','nova','harmony'] },
+  { n:'小米',    c:'#ff6900', m:'mi',     k:['小米','xiaomi','redmi','红米','米家','mijia'] },
+  { n:'三星',    c:'#1428a0', k:['三星','samsung','galaxy'] },
+  { n:'索尼',    c:'#0b3d91', k:['索尼','sony','bravia','playstation'] },
+  { n:'OPPO',    c:'#1a7f37', k:['oppo'] },
+  { n:'vivo',    c:'#415fff', k:['vivo'] },
+  { n:'一加',    c:'#eb0028', k:['oneplus','一加'] },
+  { n:'海尔',    c:'#0a67b1', k:['海尔','haier'] },
+  { n:'美的',    c:'#1f7fd8', k:['美的','midea'] },
+  { n:'格力',    c:'#0aa2e0', k:['格力','gree'] },
+  { n:'云鲸',    c:'#12b886', k:['云鲸','narwal'] },
+  { n:'石头',    c:'#3b82f6', k:['石头','roborock'] },
+  { n:'科沃斯',  c:'#0ea5e9', k:['科沃斯','ecovacs'] },
+  { n:'TP-LINK', c:'#00a5a8', k:['tp-link','tplink','普联'] },
+  { n:'联想',    c:'#e2231a', k:['联想','lenovo','thinkpad','thinkcentre'] },
+  { n:'戴尔',    c:'#007db8', k:['戴尔','dell'] },
+  { n:'惠普',    c:'#0096d6', k:['惠普','hewlett'] },
+  { n:'华硕',    c:'#00539b', k:['华硕','asus'] },
+  { n:'群晖',    c:'#1b1b1b', k:['群晖','synology'] },
+  { n:'Intel',   c:'#0068b5', k:['intel'] },
+  { n:'中兴',    c:'#0b5ea8', k:['中兴','zte'] }
+];
+var KINDS = [
+  { l:'扫地机器人', i:'🧹', k:['扫地','拖扫','扫拖','吸尘','vacuum','云鲸','roborock','石头','科沃斯','narwal','ecovacs'] },
+  { l:'网络存储',   i:'🗄️', k:['网络存储','nas','as6020','群晖','synology','存储','硬盘'] },
+  { l:'摄像头',     i:'📷', k:['摄像机','摄像头','监控','camera','ipc','门铃','doorbell'] },
+  { l:'打印机',     i:'🖨️', k:['打印机','printer'] },
+  { l:'冰箱',       i:'❄️', k:['冰箱','冷柜','冰柜','fridge','冷冻'] },
+  { l:'洗衣机',     i:'🧺', k:['洗衣机','washer','干衣'] },
+  { l:'空调',       i:'🌬️', k:['空调','conditioner'] },
+  { l:'电视',       i:'📺', k:['电视','bravia','机顶盒','投影','projector','tv'] },
+  { l:'音箱',       i:'🔊', k:['音箱','音响','speaker','homepod','soundbar','小爱','echo'] },
+  { l:'手表',       i:'⌚', k:['手表','手环','watch','band'] },
+  { l:'游戏机',     i:'🎮', k:['游戏机','playstation','xbox','switch','ps5','ps4'] },
+  { l:'路由器',     i:'📡', k:['路由','router','光猫','optixstar','optistar','交换机','mesh','be7'] },
+  { l:'平板',       i:'📱', k:['ipad','平板','tablet','tab'] },
+  { l:'电脑',       i:'💻', k:['macbook','笔记本','laptop','desktop','电脑','imac','thinkpad','thinkcentre','windows','服务器'] },
+  { l:'手机',       i:'📱', k:['iphone','mate','手机','phone','galaxy','redmi','pixel','nova','pura','honor','荣耀'] },
+  { l:'智能设备',   i:'🔌', k:['模组','module','iot','传感器','插座','开关','灯泡','净化','加湿','风扇','窗帘','灯'] }
+];
+function devMeta(d){
+  var s = ((d.name || '') + ' ' + (d.brand || '') + ' ' + (d.type || '')).toLowerCase();
+  var br = null, kd = null, i, j;
+  for (i = 0; i < BRANDS.length && !br; i++) for (j = 0; j < BRANDS[i].k.length; j++) { if (s.indexOf(BRANDS[i].k[j]) >= 0) { br = BRANDS[i]; break; } }
+  for (i = 0; i < KINDS.length && !kd; i++) for (j = 0; j < KINDS[i].k.length; j++) { if (s.indexOf(KINDS[i].k[j]) >= 0) { kd = KINDS[i]; break; } }
+  return { br: br, kd: kd };
+}
+var APPLE_D = 'M12.15 6.9c-.95 0-2.42-1.08-3.96-1.04-2.04.03-3.91 1.18-4.96 3.01-2.12 3.68-.55 9.1 1.52 12.09 1.01 1.45 2.21 3.09 3.79 3.04 1.52-.07 2.09-.99 3.94-.99 1.83 0 2.35.99 3.96.95 1.64-.03 2.68-1.48 3.68-2.95 1.16-1.69 1.64-3.32 1.66-3.41-.04-.01-3.18-1.22-3.22-4.86-.03-3.04 2.48-4.49 2.6-4.56-1.43-2.09-3.62-2.32-4.39-2.38-2-.16-3.67 1.09-4.61 1.09zM15.53 3.83c.84-1.01 1.4-2.43 1.25-3.83-1.21.05-2.66.8-3.53 1.82-.78.9-1.45 2.34-1.27 3.71 1.34.1 2.71-.69 3.56-1.7';
+function brandMark(b){
+  if (!b) return '';
+  if (b.m === 'apple') return '<svg viewBox="0 0 24 24"><path fill="' + b.c + '" d="' + APPLE_D + '"/></svg>';
+  if (b.m === 'huawei') {
+    var p = '';
+    for (var a = 0; a < 360; a += 45) p += '<ellipse cx="12" cy="6.2" rx="2.2" ry="4.6" transform="rotate(' + a + ' 12 12)"/>';
+    return '<svg viewBox="0 0 24 24"><g fill="' + b.c + '">' + p + '</g></svg>';
+  }
+  if (b.m === 'mi') return '<svg viewBox="0 0 24 24"><rect x="1" y="1" width="22" height="22" rx="5.5" fill="' + b.c + '"/><text x="12" y="17" font-size="13" font-weight="700" fill="#fff" text-anchor="middle" font-family="Helvetica,Arial,sans-serif">MI</text></svg>';
+  return '';
+}
+function devIcon(m){
+  var kd = m.kd, br = m.br;
+  if (kd && br && (kd.l === '手机' || kd.l === '平板' || kd.l === '电脑')) { var s = brandMark(br); if (s) return s; }
+  return kd ? kd.i : '🧩';
+}
 function gwTick(){
   if (!GW.on) return;
   var body = { ip: GW.ip, user: GW.user };
@@ -743,9 +812,12 @@ function gwTick(){
         if (!ds.length) { b.innerHTML = '<tr><td colspan="6" class="hint">无设备</td></tr>'; }
         else {
           b.innerHTML = ds.map(function(d){
-            return '<tr><td><span class="ico">' + (d.link === 'wifi' ? '📶' : '🔌') + '</span></td>'
-              + '<td><div class="name">' + esc(d.name || d.ip) + '</div><div class="sub">' + esc(d.ip) + '</div></td>'
-              + '<td class="sub">' + esc(d.brand || '') + '</td>'
+            var m = devMeta(d), kd = m.kd, br = m.br;
+            var lbl = br ? br.n : (kd ? kd.l : '');
+            var link = d.link === 'wifi' ? '📶' : '🔌';
+            return '<tr><td><span class="ico">' + devIcon(m) + '</span></td>'
+              + '<td><div class="name">' + esc(d.name || d.ip) + '</div><div class="sub">' + link + ' ' + esc(d.ip) + '</div></td>'
+              + '<td class="sub">' + (lbl ? '<span class="bdg" style="color:' + (br ? br.c : '#94a3b8') + '">' + esc(lbl) + '</span>' : '') + '</td>'
               + '<td class="num dn">' + fmtSpeed(d.down) + '</td>'
               + '<td class="num up">' + fmtSpeed(d.up) + '</td>'
               + '<td class="sub">' + esc(gwDur(d.online_time)) + '</td></tr>';
