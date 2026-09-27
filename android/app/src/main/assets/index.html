@@ -966,7 +966,7 @@ function anRender(j){
   for (var h3 = 0; h3 < nh; h3++){
     var tot = 0, mx = 0, ct2 = 0, any2 = 0, pr2 = 0;
     for (var k2 = h3 * 60; k2 < (h3 + 1) * 60; k2++){ if (hs[k2]) any2 = 1; if (pr[k2]) pr2 = 1; tot += sp[k2]; if (sp[k2] > mx) mx = sp[k2]; ct2++; }
-    var st = !any2 ? '<span class="sub">无数据</span>' : (!pr2 ? '<span class="c-brand">休眠/离线</span>' : (tot / ct2 < AN_THR ? '<span class="c-warn">空闲</span>' : '<span class="c-ok">有流量</span>'));
+    var st = !any2 ? '<span class="sub">无</span>' : (!pr2 ? '<span class="c-brand">休眠/离线</span>' : (tot / ct2 < AN_THR ? '<span class="c-warn">空闲</span>' : '<span class="c-ok">有</span>'));
     var t0 = from + h3 * 3600, t1 = t0 + 3600;
     // 行序即时间先后（由早到晚，索引 0 为窗口起点）
     var hlbl = anHMin(t0) + '–' + anHMin(t1);
