@@ -35,6 +35,12 @@
   .card .k { font-size:var(--fs-sm); color:var(--muted); }
   .card .v { font-size:var(--fs-xl); font-weight:650; margin-top:2px; font-variant-numeric:tabular-nums; letter-spacing:-.2px; }
 
+  /* 监控页：拓扑图 + 合并后的一行汇总 */
+  .stline { padding:0 var(--pad-x) 9px; font-size:var(--fs-sm); color:var(--muted); }
+  .stline b { color:#0f172a; font-weight:650; font-variant-numeric:tabular-nums; }
+  .topo-wrap { padding:0 var(--pad-x) 8px; }
+  .topo-svg { display:block; width:100%; height:auto; }
+
   /* 面板 */
   .panel { background:#fff; border:1px solid var(--line); border-radius:var(--r-2); margin-bottom:var(--sp-3); overflow:hidden; }
   .panel .pt { display:flex; justify-content:space-between; align-items:center; gap:var(--sp-2);
@@ -189,11 +195,11 @@
     <div class="hrow"><button id="sysBtn" onclick="openSys()" class="iconbtn">⚙</button></div>
   </header>
   <div id="viewMon">
-  <div class="cards">
-    <div class="card"><div class="k">在线设备</div><div class="v" id="cOn">–</div></div>
-    <div class="card"><div class="k">总下载</div><div class="v dn" id="cDn">–</div></div>
-    <div class="card"><div class="k">总上传</div><div class="v up" id="cUp">–</div></div>
-    <div class="card"><div class="k">今日总流量</div><div class="v" id="cDay">–</div></div>
+  <div class="panel" id="topoPanel">
+    <div class="pt"><span>📡 网络拓扑</span><span class="sub" id="topoSum">–</span></div>
+    <div class="stline">在线 <b id="cOn">–</b> · ↓ <b class="dn" id="cDn">–</b> · ↑ <b class="up" id="cUp">–</b> · 今日 <b id="cDay">–</b></div>
+    <div class="topo-wrap"><svg id="topoSvg" class="topo-svg" viewBox="0 0 340 40"></svg></div>
+    <div class="hint" id="topoHint"></div>
   </div>
   <div class="panel" id="gwPanel" style="display:none">
     <div class="pt"><span>网关设备</span><span class="sub" id="gwSum"></span></div>
@@ -652,6 +658,7 @@ function gwStop(){
   if (GW.timer) { clearInterval(GW.timer); GW.timer = null; }
   try { if (window.SeeBridge && SeeBridge.gwBg) SeeBridge.gwBg(false); } catch(e) {}
   var p = document.getElementById('gwPanel'); if (p) p.style.display = 'none';
+  GW.last = []; topoPaint();
   var o = document.getElementById('gwOut'); if (o) o.textContent = '已停止采集（后台服务已关）';
 }
 function gwDur(s){
@@ -727,6 +734,58 @@ function gwSortBy(k){
   else { GW.sort.k = k; GW.sort.d = (k === 'name' || k === 'brand' || k === 'link') ? 1 : -1; }
   gwPaint();
 }
+/* ---- 监控页：设备网络拓扑（替代原四个统计块） ---- */
+function topoNode(x, y, d, wired){
+  var m = devMeta(d);
+  var ic = m.kd ? m.kd.i : (wired ? '🖥' : '📱');
+  var on = SEL_IP && selOf(d) === SEL_IP;
+  var fill = wired ? '#f8fafc' : '#f0fdf4';
+  var st = on ? '#2563eb' : (wired ? '#cbd5e1' : '#86efac');
+  var s = '<rect x="' + x + '" y="' + y + '" width="160" height="32" rx="8" fill="' + fill
+        + '" stroke="' + st + '" stroke-width="' + (on ? 2 : 1) + '"/>';
+  s += '<text x="' + (x + 9) + '" y="' + (y + 13) + '" font-size="10" fill="#0f172a">'
+     + esc(ic + ' ' + cutName(d.name || d.ip, 8)) + '</text>';
+  s += '<text x="' + (x + 151) + '" y="' + (y + 13) + '" text-anchor="end" font-size="9.5" fill="#0e7490">↓'
+     + esc(fmtSpeed(d.down)) + '</text>';
+  s += '<text x="' + (x + 9) + '" y="' + (y + 25) + '" font-size="9" fill="#69737f">'
+     + esc(cutName(d.ip, 15)) + '</text>';
+  s += '<text x="' + (x + 151) + '" y="' + (y + 25) + '" text-anchor="end" font-size="9" fill="#c2410c">↑'
+     + esc(fmtSpeed(d.up)) + '</text>';
+  return s;
+}
+function topoPaint(){
+  var svg = document.getElementById('topoSvg'); if (!svg) return;
+  var sum = document.getElementById('topoSum'), hint = document.getElementById('topoHint');
+  var ds = (GW.last || []).slice();
+  if (!ds.length){
+    svg.innerHTML = ''; svg.setAttribute('viewBox', '0 0 340 40');
+    if (sum) sum.textContent = '';
+    if (hint) hint.textContent = GW.on ? '暂无设备数据' : '未开启实时设备 · 在 ⚙ 里点「📶 开启实时设备」后显示拓扑';
+    return;
+  }
+  if (hint) hint.textContent = '';
+  var wf = [], wr = [], i;
+  for (i = 0; i < ds.length; i++) (gwLink(ds[i]) === '无线' ? wf : wr).push(ds[i]);
+  if (sum) sum.textContent = '🔌 有线 ' + wr.length + ' · 📶 无线 ' + wf.length;
+  var NW = 160, GAP = 8, M = 6, ROW = 38, TOP = 78;
+  var colX = [M, M + NW + GAP], colC = [M + NW / 2, M + NW + GAP + NW / 2];
+  var groups = [wf, wr], rows = Math.max(wf.length, wr.length, 1);
+  var s = [];
+  s.push('<rect x="110" y="6" width="120" height="36" rx="10" fill="#eef4ff" stroke="#2563eb" stroke-width="1.2"/>');
+  s.push('<text x="170" y="21" text-anchor="middle" font-size="10" font-weight="600" fill="#0f172a">📡 网关</text>');
+  s.push('<text x="170" y="34" text-anchor="middle" font-size="9" fill="#69737f">' + esc((GW.ip || '') + ' · 在线 ' + ds.length) + '</text>');
+  s.push('<path d="M170 42 V52" stroke="#cbd5e1" stroke-width="1.2" fill="none"/>');
+  s.push('<path d="M' + colC[0] + ' 52 H' + colC[1] + '" stroke="#cbd5e1" stroke-width="1.2" fill="none"/>');
+  for (i = 0; i < 2; i++){
+    var list = groups[i], wired = (i === 1);
+    if (list.length) s.push('<path d="M' + colC[i] + ' 52 V' + (TOP + (list.length - 1) * ROW + 16) + '" stroke="#cbd5e1" stroke-width="1.2" fill="none"/>');
+    s.push('<text x="' + colC[i] + '" y="68" text-anchor="middle" font-size="9.5" fill="' + (wired ? '#69737f' : '#0f766e')
+      + '" stroke="#fff" stroke-width="3" paint-order="stroke">' + (wired ? '🔌 有线 ' : '📶 无线 ') + list.length + '</text>');
+    for (var j = 0; j < list.length; j++) s.push(topoNode(colX[i], TOP + j * ROW, list[j], wired));
+  }
+  svg.setAttribute('viewBox', '0 0 340 ' + (TOP + rows * ROW));
+  svg.innerHTML = s.join('');
+}
 function gwPaint(){
   var b = document.getElementById('gwBody'); if (!b) return;
   var ds = (GW.last || []).slice();
@@ -778,6 +837,7 @@ function gwTick(){
       if (e) e.textContent = '';
       GW.last = j.devices || [];
       gwPaint();
+      topoPaint();
       var t = j.totals || {};
       if (s) s.textContent = '↓' + fmtSpeed(t.wdown) + ' ↑' + fmtSpeed(t.wup) + ' · 有线' + (t.wired || 0) + '/无线' + (t.wireless || 0);
       var box = document.getElementById('gwOut');
