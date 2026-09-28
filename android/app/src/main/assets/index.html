@@ -244,7 +244,7 @@
   #chartFsBtn { display:none; position:fixed; right:10px; top:10px; z-index:965; border:none; background:rgba(17,24,39,.86); color:#fff; font-size:12px; line-height:1; padding:8px 12px; border-radius:999px; cursor:pointer; -webkit-tap-highlight-color:transparent; }
   body.chartfs { overflow:hidden; }
   body.chartfs .tabbar { display:none; }
-  body.chartfs .chart-svg.chart-fs { position:fixed; left:0; top:0; width:100vw; height:100vh; z-index:950; background:#fff; border:none; border-radius:0; }
+  body.chartfs .chart-svg.chart-fs { position:fixed; left:0; top:0; width:100vw; height:100vh; z-index:950; background:#fff; border:none; border-radius:0; touch-action:none; -webkit-user-select:none; user-select:none; }
 </style>
 </head>
 <body>
@@ -1462,7 +1462,15 @@ var CHART_REDRAW = {
   lvChart: function(){ if (LV.last) anLiveBars(LV.last); }
 };
 function chartMarkRect(b, padT, ih){
-  return '<rect x="' + (b.x0 - 0.5).toFixed(2) + '" y="' + padT + '" width="' + Math.max(b.x1 - b.x0 + 1, 1).toFixed(2) + '" height="' + ih + '" fill="#f59e0b" fill-opacity="0.22" stroke="#f59e0b" stroke-width="0.8" pointer-events="none"/>';
+  return '<rect id="chartSelMark" x="' + (b.x0 - 0.5).toFixed(2) + '" y="' + padT + '" width="' + Math.max(b.x1 - b.x0 + 1, 1).toFixed(2) + '" height="' + ih + '" fill="#f59e0b" fill-opacity="0.22" stroke="#f59e0b" stroke-width="0.8" pointer-events="none"/>';
+}
+function chartMoveMark(svg, b){
+  var el = svg.__markEl;
+  if (!el || !el.parentNode) el = svg.querySelector('#chartSelMark');
+  svg.__markEl = el;
+  if (!el) return;
+  el.setAttribute('x', (b.x0 - 0.5).toFixed(2));
+  el.setAttribute('width', Math.max(b.x1 - b.x0 + 1, 1).toFixed(2));
 }
 function chartTipEl(){ return document.getElementById('chart' + 'Tip'); }
 function chartTipSync(svg){
@@ -1492,9 +1500,14 @@ function chartSelectPoint(svgId, pt){
     }
   }
   if (idx < 0) return;
-  svg.__sel = idx;
-  if (CHART_REDRAW[svgId]) CHART_REDRAW[svgId]();   // 重画一次以显示选中高亮
+  if (svg.__sel !== idx){
+    var had = !!svg.querySelector('#chartSelMark');
+    svg.__sel = idx;
+    // 第一次选中才重画（把高亮矩形插进图里）；之后左右拖动只挪这个矩形，别每帧重画
+    if (!had && CHART_REDRAW[svgId]) CHART_REDRAW[svgId]();
+  }
   var hb = (svg.__bars || [])[idx]; if (!hb) return;
+  chartMoveMark(svg, hb);
   var tip = chartTipEl(); if (!tip) return;
   tip.innerHTML = hb.tip;
   tip.style.display = 'block';
@@ -1515,10 +1528,13 @@ function chartSelectPoint(svgId, pt){
 }
 function chartBindTap(svgId){
   var svg = document.getElementById(svgId); if (!svg) return;
+  var dragging = false, hadDrag = false, downX = 0, downY = 0;
+
   svg.addEventListener('click', function(ev){
+    if (CHART_FS === svgId) return;                // 全屏下选点/拖动全走 pointer 事件
     var now = Date.now();
     if (chartTapTimer) { clearTimeout(chartTapTimer); chartTapTimer = null; }
-    if (now - chartLastTap < 300){                 // 双击 → 进/退全屏
+    if (now - chartLastTap < 300){                 // 双击 → 进全屏
       chartLastTap = 0;
       chartToggleFs(svgId);
       return;
@@ -1530,6 +1546,30 @@ function chartBindTap(svgId){
       chartSelectPoint(svgId, pt);
     }, 300);
   });
+
+  // 全屏下：按下即选点；左右拖动连续移动时间点；小框常驻，不会自动消失。
+  // 全屏里不再用双击退出（会和拖动/连续选点打架），退出走 ✕ / Esc / 手机返回键。
+  svg.addEventListener('pointerdown', function(ev){
+    if (CHART_FS !== svgId) return;
+    dragging = true; hadDrag = false;
+    downX = ev.clientX; downY = ev.clientY;
+    try { svg.setPointerCapture(ev.pointerId); } catch (e) {}
+    chartSelectPoint(svgId, chartSvgPoint(svg, ev));
+    ev.preventDefault();
+  });
+  svg.addEventListener('pointermove', function(ev){
+    if (!dragging || CHART_FS !== svgId) return;
+    if (!hadDrag && (Math.abs(ev.clientX - downX) > 3 || Math.abs(ev.clientY - downY) > 3)) hadDrag = true;
+    if (hadDrag) chartSelectPoint(svgId, chartSvgPoint(svg, ev));
+    ev.preventDefault();
+  });
+  function endDrag(ev){
+    if (!dragging) return;
+    dragging = false;
+    try { svg.releasePointerCapture(ev.pointerId); } catch (e) {}
+  }
+  svg.addEventListener('pointerup', endDrag);
+  svg.addEventListener('pointercancel', endDrag);
 }
 function chartLockLand(){ try { if (screen.orientation && screen.orientation.lock) { var p = screen.orientation.lock('landscape'); if (p && p.catch) p.catch(function(){}); } } catch (e) {} }
 function chartUnlockLand(){ try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch (e) {} }
@@ -1575,6 +1615,7 @@ function seeExitChartFs(){
 }
 window.seeExitChartFs = seeExitChartFs;
 document.addEventListener('click', function(ev){
+  if (CHART_FS) return;                 // 全屏里小框常驻，只有退出全屏才收
   var t = ev.target;
   if (t && t.closest && t.closest('.chart-svg')) return;
   if (t && t.id === 'chartFsBtn') return;
