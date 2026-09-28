@@ -318,7 +318,17 @@ def _eff_on(cfg):
 UIPASS_PATH = os.path.join(ROOT, 'data', 'ui-pass.json')
 SESS_PATH = os.path.join(ROOT, 'data', 'sessions.json')
 LOGIN_FAIL = {}
-SESSION_TTL = 90 * 86400
+# 会话不设过期：一台设备登录一次就一直有效，只有「改口令（全端重登）」或主动退出才失效。
+# 0 = 永不过期（只有设备自己把令牌弄丢了才会重新登录）。
+SESSION_TTL = 0
+
+
+def _sess_ok(s):
+    """会话是否有效：exp=0 表示永久。"""
+    if not isinstance(s, dict):
+        return False
+    exp = int(s.get('exp', 0) or 0)
+    return exp == 0 or exp > time.time()
 
 
 def _opt(methods='GET, POST, OPTIONS'):
@@ -372,8 +382,7 @@ def _load_sessions():
 
 
 def _save_sessions(d):
-    now = int(time.time())
-    d = {k: v for k, v in d.items() if int(v.get('exp', 0)) > now}
+    d = {k: v for k, v in d.items() if _sess_ok(v)}
     os.makedirs(os.path.dirname(SESS_PATH), exist_ok=True)
     tmp = SESS_PATH + '.tmp'
     with open(tmp, 'w', encoding='utf-8') as f:
@@ -385,7 +394,7 @@ def _save_sessions(d):
 def _new_session():
     tok = secrets.token_hex(24)
     d = _load_sessions()
-    d[tok] = {'exp': int(time.time()) + SESSION_TTL, 'ts': int(time.time()),
+    d[tok] = {'exp': (int(time.time()) + SESSION_TTL) if SESSION_TTL else 0, 'ts': int(time.time()),
               'ip': (request.headers.get('X-Real-IP') or request.remote_addr or '')[:45],
               'ua': (request.headers.get('User-Agent') or '')[:120]}
     _save_sessions(d)
@@ -420,8 +429,7 @@ def _auth_kind():
         return 'key'
     tok = (request.headers.get('X-See-Session') or request.args.get('sess') or '').strip()
     if tok:
-        s = _load_sessions().get(tok)
-        if s and int(s.get('exp', 0)) > time.time():
+        if _sess_ok(_load_sessions().get(tok)):
             return 'sess'
     return None
 
@@ -555,7 +563,10 @@ def api_pass():
         return jsonify(ok=False, error='新口令和原口令一样'), 400
     LOGIN_FAIL.pop(ip, None)
     _save_uipass(new)
-    return jsonify(ok=True)
+    # 口令变了 → 所有设备的旧令牌立即作废（别的设备要重新登录）；
+    # 改口令的这台设备当场换发新令牌，不用重登。
+    _save_sessions({})
+    return jsonify(ok=True, token=_new_session())
 
 
 @app.route('/api/session/all', methods=['OPTIONS', 'POST'])

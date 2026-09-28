@@ -776,9 +776,11 @@ function doLogout(){
   setSess(''); showLogin(); loginMode(false);
 }
 function checkSession(){
-  return fetch(API + '/session').then(function(r){ return r.json(); }).then(function(j){
+  // 关键：必须带上本机已存的会话令牌，否则服务端只能当成匿名 → 每次打开都弹登录框。
+  return apiFetch(API + '/session').then(function(r){ return r.json(); }).then(function(j){
     if (j && j.authed){ hideLogin(); }
-    else { loginMode(!!(j && j.need_setup)); showLogin(); }
+    else if (j && j.authed === false){ loginMode(!!j.need_setup); showLogin(); }
+    // 拿不到结论（网络/服务未起）时不清令牌、不弹登录，等下一次调用再说
     return j;
   }).catch(function(){ return {}; });
 }
@@ -798,7 +800,8 @@ function chPass(){
     .then(function(r){ return r.json().then(function(j){ return {s:r.status, j:j}; }); })
     .then(function(x){
       if(x.j && x.j.ok){
-        say('已改好。这台设备不用重登。', true);
+        if (x.j.token) setSess(x.j.token);   // 本机当场换发新令牌，不用重登
+        say('已改好。本机已自动续上，其它设备需要重新登录。', true);
         ['pwCur','pwNew','pwNew2'].forEach(function(id){ var e=document.getElementById(id); if(e) e.value=''; });
       } else { say('❌ '+((x.j && x.j.error) || ('HTTP '+x.s)), false); }
     })
