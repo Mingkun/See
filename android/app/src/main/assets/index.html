@@ -243,7 +243,11 @@
   /* 柱状图：双击进全屏（横屏）+ 点选某个时间点看数据 */
   .chart-svg { touch-action: manipulation; }
   #chartTip { display:none; position:fixed; z-index:960; max-width:240px; background:rgba(17,24,39,.95); color:#fff; font-size:11px; line-height:1.55; padding:6px 9px; border-radius:8px; box-shadow:0 6px 18px rgba(15,23,42,.28); pointer-events:none; }
-  #chartFsBtn { display:none; position:fixed; right:10px; top:10px; z-index:965; border:none; background:rgba(17,24,39,.86); color:#fff; font-size:12px; line-height:1; padding:8px 12px; border-radius:999px; cursor:pointer; -webkit-tap-highlight-color:transparent; }
+  /* 进全屏时短暂提示（2.6s 后自动淡出），不是常驻按钮 */
+  #chartFsHint { display:none; position:fixed; left:50%; bottom:22px; transform:translateX(-50%); z-index:965; background:rgba(17,24,39,.86); color:#fff; font-size:12px; line-height:1; padding:8px 12px; border-radius:999px; pointer-events:none; -webkit-tap-highlight-color:transparent; white-space:nowrap; }
+  #chartFsHint.on { display:block; -webkit-animation: fshint 2.6s ease forwards; animation: fshint 2.6s ease forwards; }
+  @-webkit-keyframes fshint { 0%{opacity:0;} 12%{opacity:1;} 76%{opacity:1;} 100%{opacity:0;} }
+  @keyframes fshint { 0%{opacity:0;} 12%{opacity:1;} 76%{opacity:1;} 100%{opacity:0;} }
   body.chartfs { overflow:hidden; }
   body.chartfs .tabbar { display:none; }
   body.chartfs .chart-svg.chart-fs { position:fixed; left:0; top:0; width:100vw; height:100vh; z-index:950; background:#fff; border:none; border-radius:0; touch-action:none; -webkit-user-select:none; user-select:none; }
@@ -1535,7 +1539,7 @@ function chartSelectPoint(svgId, pt){
 }
 function chartBindTap(svgId){
   var svg = document.getElementById(svgId); if (!svg) return;
-  var dragging = false, hadDrag = false, downX = 0, downY = 0;
+  var dragging = false, hadDrag = false, downX = 0, downY = 0, fsLastTap = 0;
 
   svg.addEventListener('click', function(ev){
     if (CHART_FS === svgId) return;                // 全屏下选点/拖动全走 pointer 事件
@@ -1555,7 +1559,8 @@ function chartBindTap(svgId){
   });
 
   // 全屏下：按下即选点；左右拖动连续移动时间点；小框常驻，不会自动消失。
-  // 全屏里不再用双击退出（会和拖动/连续选点打架），退出走 ✕ / Esc / 手机返回键。
+  // 退出全屏：双击（两次快速轻点，没拖动）→ 退；Esc / 手机返回键同样有效。
+  // 双击只能在 pointer 层数 —— pointerdown 里 preventDefault 后触屏不会再合成 click。
   svg.addEventListener('pointerdown', function(ev){
     if (CHART_FS !== svgId) return;
     dragging = true; hadDrag = false;
@@ -1570,13 +1575,17 @@ function chartBindTap(svgId){
     if (hadDrag) chartSelectPoint(svgId, chartSvgPoint(svg, ev));
     ev.preventDefault();
   });
-  function endDrag(ev){
+  function endDrag(ev, isTap){
     if (!dragging) return;
     dragging = false;
     try { svg.releasePointerCapture(ev.pointerId); } catch (e) {}
+    if (!isTap || hadDrag || CHART_FS !== svgId) return;   // 拖过的不算轻点
+    var now = Date.now();
+    if (now - fsLastTap < 320){ fsLastTap = 0; seeExitChartFs(); }   // 双击 → 退出全屏
+    else fsLastTap = now;
   }
-  svg.addEventListener('pointerup', endDrag);
-  svg.addEventListener('pointercancel', endDrag);
+  svg.addEventListener('pointerup', function(ev){ endDrag(ev, true); });
+  svg.addEventListener('pointercancel', function(ev){ endDrag(ev, false); });
 }
 function chartLockLand(){ try { if (screen.orientation && screen.orientation.lock) { var p = screen.orientation.lock('landscape'); if (p && p.catch) p.catch(function(){}); } } catch (e) {} }
 function chartUnlockLand(){ try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch (e) {} }
@@ -1604,7 +1613,8 @@ function chartToggleFs(svgId){
   CHART_FS = svgId;
   document.body.classList.add('chartfs');
   svg.classList.add('chart-fs');
-  var b = document.getElementById('chartFsBtn'); if (b) b.style.display = 'block';
+  var h = document.getElementById('chartFsHint');
+  if (h){ h.classList.remove('on'); void h.offsetWidth; h.classList.add('on'); }   // 重放动画
   chartHideTip();
   if (CHART_REDRAW[svgId]) CHART_REDRAW[svgId]();
   chartNativeFs(true);
@@ -1615,7 +1625,7 @@ function seeExitChartFs(){
   var svg = document.getElementById(id);
   if (svg) { svg.classList.remove('chart-fs'); svg.__sel = null; }
   document.body.classList.remove('chartfs');
-  var b = document.getElementById('chartFsBtn'); if (b) b.style.display = 'none';
+  var h = document.getElementById('chartFsHint'); if (h) h.classList.remove('on');
   chartHideTip();
   if (CHART_REDRAW[id]) CHART_REDRAW[id]();
   chartNativeFs(false);
@@ -1625,7 +1635,6 @@ document.addEventListener('click', function(ev){
   if (CHART_FS) return;                 // 全屏里小框常驻，只有退出全屏才收
   var t = ev.target;
   if (t && t.closest && t.closest('.chart-svg')) return;
-  if (t && t.id === 'chartFsBtn') return;
   chartHideTip();
 }, true);
 document.addEventListener('keydown', function(ev){ if (ev.key === 'Escape' && CHART_FS) seeExitChartFs(); });
@@ -1636,7 +1645,7 @@ chartInit();
 
 checkSession().then(function(){ boot(); });
 </script>
-<div id="chartFsBtn" onclick="seeExitChartFs()">✕ 退出全屏</div>
+<div id="chartFsHint">双击任意位置退出全屏</div>
 <div id="chartTip"></div>
 <div id="loginMask" style="display:none;position:fixed;inset:0;z-index:99;background:rgba(15,23,42,.55);align-items:center;justify-content:center">
   <div class="lgbx">
