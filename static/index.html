@@ -156,6 +156,10 @@
   .ddopt.on { background:#eef4ff; color:var(--brand); font-weight:600; }
   .ddopt:active { background:#f6f8fb; }
   /* 分时用量：今天的行黑字白底、昨天的行黑字灰底；当前小时红字闪动、白底 */
+  /* 状态列只有 2 字，固定不换行，手机窄屏也挤在一行 */
+  #anHourBody td:last-child { white-space:nowrap; }
+  #anHourBody td:last-child span { font-size:var(--fs-sm); white-space:nowrap; }
+  #anSleepBody td:nth-child(3) { white-space:nowrap; }
   #anHourBody tr.today td { background:#fff; }
   #anHourBody tr.prev  td { background:#eef1f5; }
   .curhour { color:#dc2626 !important; font-weight:600; background:#fff;
@@ -275,11 +279,11 @@
       <button type="button" onclick="anLoad()" class="btn">刷新</button>
     </div>
     <div class="pbody mt-1"><svg id="anChart" class="chart-svg"></svg></div>
-    <div  class="sub legend"><span id="anAxisTxt">横轴 0–24 时</span> · 纵轴为下行+上行速率（对数显示）；<span class="c-muted">▬</span> 无数据 · <span class="c-muted">▬</span> 休眠/离线 · <span class="c-brand">▬</span> 有流量</div>
+    <div  class="sub legend"><span id="anAxisTxt">横轴 0–24 时</span> · 纵轴为下行+上行速率（对数显示）；<span class="c-muted">▬</span> 无数据 · <span class="c-muted">▬</span> 空闲 · <span class="c-brand">▬</span> 有流量</div>
     <div id="anLegend"  class="sub legend"></div>
   </div>
   <div class="panel" id="anSleepPanel" style="display:none">
-    <div class="pt">😴 休眠 / 空闲<span class="sub sub-inline">（连续 ≥10 分钟无流量或离线）</span></div>
+    <div class="pt">😴 空闲<span class="sub sub-inline">（连续 ≥10 分钟无流量）</span></div>
     <div class="scrollx">
       <table>
         <thead><tr><th>时段</th><th>时长</th><th>类型</th><th>期间峰值</th></tr></thead>
@@ -1214,23 +1218,21 @@ function anRender(j){
   while (i2 < n){
     var idle = hs[i2] ? (pr[i2] ? (sp[i2] < AN_THR) : true) : false;
     if (!idle) { i2++; continue; }
-    var j2 = i2, peak = 0, offline = 0;
+    var j2 = i2, peak = 0;
     while (j2 < n){
       var idle2 = hs[j2] ? (pr[j2] ? (sp[j2] < AN_THR) : true) : false;
       if (!idle2) break;
       if (sp[j2] > peak) peak = sp[j2];
-      if (!pr[j2]) offline++;
       j2++;
     }
-    if (j2 - i2 >= 10) runs.push({ a: i2, b: j2, len: j2 - i2, peak: peak, type: offline > (j2 - i2) / 2 ? '休眠/离线' : '空闲' });
+    if (j2 - i2 >= 10) runs.push({ a: i2, b: j2, len: j2 - i2, peak: peak });
     i2 = j2;
   }
   var sb = document.getElementById('anSleepBody');
-  if (!runs.length) { sb.innerHTML = '<tr><td colspan="4" class="hint">没找到 ≥10 分钟的休眠/空闲时段</td></tr>'; }
+  if (!runs.length) { sb.innerHTML = '<tr><td colspan="4" class="hint">没找到 ≥10 分钟的空闲时段</td></tr>'; }
   else {
     sb.innerHTML = runs.map(function(r){
-      var tip = r.type === '休眠/离线' ? '设备已从网关列表消失（断电/休眠/离开）' : '在线但几乎无流量';
-      return '<tr><td class="num">' + anHMin(from + r.a * 60) + '–' + anHMin(from + r.b * 60) + '</td><td class="num">' + anFmtDur(r.len) + '</td><td class="sub">' + r.type + '<div class="sub fs-xs">' + tip + '</div></td><td class="num">' + fmtSpeed(r.peak) + '</td></tr>';
+      return '<tr><td class="num">' + anHMin(from + r.a * 60) + '–' + anHMin(from + r.b * 60) + '</td><td class="num">' + anFmtDur(r.len) + '</td><td class="sub">空闲</td><td class="num">' + fmtSpeed(r.peak) + '</td></tr>';
     }).join('');
   }
   document.getElementById('anSleepPanel').style.display = '';
@@ -1240,7 +1242,7 @@ function anRender(j){
   for (var h3 = 0; h3 < nh; h3++){
     var tot = 0, mx = 0, ct2 = 0, any2 = 0, pr2 = 0;
     for (var k2 = h3 * 60; k2 < (h3 + 1) * 60; k2++){ if (hs[k2]) any2 = 1; if (pr[k2]) pr2 = 1; tot += sp[k2]; if (sp[k2] > mx) mx = sp[k2]; ct2++; }
-    var st = !any2 ? '<span class="sub">无</span>' : (!pr2 ? '<span class="c-brand">休眠/离线</span>' : (tot / ct2 < AN_THR ? '<span class="c-warn">空闲</span>' : '<span class="c-ok">有</span>'));
+    var st = !any2 ? '<span class="sub">无</span>' : ((!pr2 || tot / ct2 < AN_THR) ? '<span class="c-warn">空闲</span>' : '<span class="c-ok">有</span>');
     var t0 = from + h3 * 3600, t1 = t0 + 3600;
     // 行序即时间先后（由早到晚，索引 0 为窗口起点）
     var hlbl = anHMin(t0) + '–' + anHMin(t1);
@@ -1254,7 +1256,7 @@ function anRender(j){
   var cover = 0; for (var q = 0; q < n; q++) if (hs[q]) cover++;
   document.getElementById('anSub').textContent = (j.name || j.ip || AN.key) + ' · ' + anFmtDur(n) + '窗口';
   document.getElementById('anAxisTxt').textContent = '横轴 0–' + HRS + ' 时';
-  document.getElementById('anLegend').innerHTML = '采样覆盖 ' + (cover / n * 100).toFixed(0) + '%（' + anFmtDur(cover) + '） · 休眠/空闲 ' + runs.length + ' 段 · 空闲阈值 ' + fmtSpeed(AN_THR);
+  document.getElementById('anLegend').innerHTML = '采样覆盖 ' + (cover / n * 100).toFixed(0) + '%（' + anFmtDur(cover) + '） · 空闲 ' + runs.length + ' 段 · 空闲阈值 ' + fmtSpeed(AN_THR);
   document.getElementById('anHint').textContent = '数据来自 app 运行期间对网关的采样（每 10 秒 1 次），app 关闭期间不采集；曲线为 5 分钟一格的速率均值。';
 }
 checkSession().then(function(){ boot(); });
