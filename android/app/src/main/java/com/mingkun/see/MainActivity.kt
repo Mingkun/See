@@ -22,6 +22,8 @@ class MainActivity : Activity() {
     private var pendingApkName: String? = null
     private var pendingApkSize = 0L
     private var pendingApkMd5 = ""
+    private var chartFs = false
+    private var prevOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
 
     private fun toast(msg: String) {
         try { android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_LONG).show() } catch (_: Exception) {}
@@ -42,7 +44,27 @@ class MainActivity : Activity() {
         } catch (_: Exception) { "" }
     }
 
+    /**
+     * 柱状图全屏：网页双击图表时调用。进全屏锁横屏、退出恢复原来的方向设置。
+     * （网页侧只管样式与重绘，方向由这里控制，WebView 里不必依赖 Fullscreen API。）
+     */
     inner class Bridge {
+        @android.webkit.JavascriptInterface
+        fun setChartFs(on: Boolean) {
+            runOnUiThread {
+                if (on) {
+                    if (!chartFs) {
+                        prevOrientation = requestedOrientation
+                        chartFs = true
+                    }
+                    requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                } else {
+                    chartFs = false
+                    requestedOrientation = prevOrientation
+                }
+            }
+        }
+
         @android.webkit.JavascriptInterface
         fun confirmUpdate(ver: String, url: String, size: Double, md5: String) {
             runOnUiThread {
@@ -230,7 +252,7 @@ class MainActivity : Activity() {
                         web.postDelayed({
                             web.loadDataWithBaseURL(null,
                                 "<html><body style='font-family:sans-serif;padding:24px;line-height:1.6'>" +
-                                "<h2>see v2.14</h2><p>本机服务连接失败</p>" +
+                                "<h2>see v2.83</h2><p>本机服务连接失败</p>" +
                                 "<p style='color:#b02a37;font-size:13px'>" + msg + "</p>" +
                                 "<p style='font-size:12px;color:#666'>点返回键或重新打开应用重试</p></body></html>",
                                 "text/html", "utf-8", null)
@@ -361,6 +383,10 @@ class MainActivity : Activity() {
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
+        if (chartFs) {                       // 先退图表全屏，别直接退应用
+            web.evaluateJavascript("window.seeExitChartFs&&seeExitChartFs()", null)
+            return
+        }
         if (web.canGoBack()) web.goBack() else super.onBackPressed()
     }
 }

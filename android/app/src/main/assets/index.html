@@ -237,6 +237,14 @@
          padding:7px 0 9px; font-size:var(--fs-sm); line-height:1.2; color:var(--muted); }
   .tab .sym { display:block; font-size:18px; line-height:1.25; }
   .tab.on { color:var(--brand); }
+
+  /* 柱状图：双击进全屏（横屏）+ 点选某个时间点看数据 */
+  .chart-svg { touch-action: manipulation; }
+  #chartTip { display:none; position:fixed; z-index:960; max-width:240px; background:rgba(17,24,39,.95); color:#fff; font-size:11px; line-height:1.55; padding:6px 9px; border-radius:8px; box-shadow:0 6px 18px rgba(15,23,42,.28); pointer-events:none; }
+  #chartFsBtn { display:none; position:fixed; right:10px; top:10px; z-index:965; border:none; background:rgba(17,24,39,.86); color:#fff; font-size:12px; line-height:1; padding:8px 12px; border-radius:999px; cursor:pointer; -webkit-tap-highlight-color:transparent; }
+  body.chartfs { overflow:hidden; }
+  body.chartfs .tabbar { display:none; }
+  body.chartfs .chart-svg.chart-fs { position:fixed; left:0; top:0; width:100vw; height:100vh; z-index:950; background:#fff; border:none; border-radius:0; }
 </style>
 </head>
 <body>
@@ -1283,6 +1291,7 @@ function anLiveRender(j){
   anLiveBars(j);
 }
 function anLiveBars(j){
+  LV.last = j;                       // 供全屏重绘复用
   var svg = document.getElementById('lvChart'); if (!svg) return;
   var W = svg.clientWidth || 320, H = svg.clientHeight || 112;
   svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
@@ -1310,9 +1319,16 @@ function anLiveBars(j){
     if (slot[b]) continue;
     p.push('<rect x="' + (padL + b * bw).toFixed(2) + '" y="' + padT + '" width="' + Math.max(bw, 0.6).toFixed(2) + '" height="' + ih + '" fill="#eef2f7"/>');
   }
+  var bars = [];
   for (var c = 0; c < n; c++){
-    var s2 = slot[c]; if (!s2) continue;
+    var s2 = slot[c];
     var x0 = padL + c * bw, w = Math.max(bw - 0.5, 0.8);
+    var lbl = anHMin(frm + c * LV_STEP);
+    var bt = !s2 ? ('<b>' + lbl + '</b><br>无数据')
+           : (!s2[3] ? ('<b>' + lbl + '</b><br>不在线')
+                     : ('<b>' + lbl + '</b><br>↑ ' + fmtSpeed(s2[1]) + ' · ↓ ' + fmtSpeed(s2[2])));
+    bars.push({ x0: x0, x1: x0 + bw, tip: bt });
+    if (!s2) continue;
     if (!s2[3]){
       p.push('<rect x="' + x0.toFixed(2) + '" y="' + padT + '" width="' + w.toFixed(2) + '" height="' + ih + '" fill="#e6ebf3"/>');
       continue;
@@ -1326,7 +1342,10 @@ function anLiveBars(j){
   p.push('<text x="' + (padL - 4) + '" y="' + (padT + ih - 1) + '" font-size="8" fill="#2563eb" text-anchor="end">↓' + fmtSpeed(maxD) + '</text>');
   p.push('<text x="' + padL + '" y="' + (H - 3) + '" font-size="8" fill="#9aa4b2">' + anHMin(frm) + ' 前</text>');
   p.push('<text x="' + (padL + iw) + '" y="' + (H - 3) + '" font-size="8" fill="#9aa4b2" text-anchor="end">现在</text>');
+  if (svg.__sel != null && bars[svg.__sel]) p.push(chartMarkRect(bars[svg.__sel], padT, ih));
+  svg.__bars = bars;
   svg.innerHTML = p.join('');
+  chartTipSync(svg);
 }
 function anLoad(){
   var hrs = AN.win || 24;
@@ -1370,11 +1389,14 @@ function anRender(j){
   }
   p.push('<line x1="' + padL + '" y1="' + (padT + ih) + '" x2="' + (padL + iw) + '" y2="' + (padT + ih) + '" stroke="#dfe5ee"/>');
   p.push('<text x="4" y="' + (padT + 8) + '" font-size="8" fill="#9aa4b2">' + fmtSpeed(maxV) + '</text>');
-  var bw = iw / groups;
+  var bw = iw / groups, bars = [];
   for (var g = 0; g < groups; g++){
-    var s = 0, c = 0, any = 0, pres = 0;
-    for (var k = g * G; k < Math.min((g + 1) * G, n); k++){ if (hs[k]) any = 1; if (pr[k]) pres = 1; s += sp[k]; c++; }
+    var s = 0, c = 0, any = 0, pres = 0, pk = 0;
+    for (var k = g * G; k < Math.min((g + 1) * G, n); k++){ if (hs[k]) any = 1; if (pr[k]) pres = 1; s += sp[k]; if (sp[k] > pk) pk = sp[k]; c++; }
     var x0 = padL + g * bw, av = c ? s / c : 0;
+    var t0 = from + g * G * 60, t1 = from + Math.min((g + 1) * G, n) * 60;
+    var stt = !any ? '无数据' : (!pres ? '不在线' : (av < AN_THR ? '空闲' : '有流量'));
+    bars.push({ x0: x0, x1: x0 + bw, tip: '<b>' + anHMin(t0) + '–' + anHMin(t1) + '</b><br>均 ' + fmtSpeed(av) + ' · 峰 ' + fmtSpeed(pk) + '<br>' + stt });
     if (!any) p.push('<rect x="' + x0.toFixed(2) + '" y="' + padT + '" width="' + Math.max(bw, 0.6).toFixed(2) + '" height="' + ih + '" fill="#e9edf3"/>');
     else if (!pres) p.push('<rect x="' + x0.toFixed(2) + '" y="' + padT + '" width="' + Math.max(bw, 0.6).toFixed(2) + '" height="' + ih + '" fill="#d7e4ff"/>');
     else if (av > 0){
@@ -1382,7 +1404,10 @@ function anRender(j){
       p.push('<rect x="' + x0.toFixed(2) + '" y="' + ytop.toFixed(1) + '" width="' + Math.max(bw - 0.4, 0.6).toFixed(2) + '" height="' + Math.max(padT + ih - ytop, 0.8).toFixed(1) + '" fill="#2563eb" rx="0.6"/>');
     }
   }
+  if (svg.__sel != null && bars[svg.__sel]) p.push(chartMarkRect(bars[svg.__sel], padT, ih));
+  svg.__bars = bars;
   svg.innerHTML = p.join('');
+  chartTipSync(svg);
   var runs = [];
   var i2 = 0;
   while (i2 < n){
@@ -1429,8 +1454,142 @@ function anRender(j){
   document.getElementById('anLegend').innerHTML = '采样覆盖 ' + (cover / n * 100).toFixed(0) + '%（' + anFmtDur(cover) + '） · 空闲 ' + runs.length + ' 段 · 空闲阈值 ' + fmtSpeed(AN_THR);
   document.getElementById('anHint').textContent = '数据来自 app 运行期间对网关的采样（每 10 秒 1 次），app 关闭期间不采集；曲线为 5 分钟一格的速率均值。';
 }
+
+/* ===== 柱状图：双击进全屏（横屏）+ 点选时间点看数据 ===== */
+var CHART_FS = '', chartTapTimer = null, chartLastTap = 0;
+var CHART_REDRAW = {
+  anChart: function(){ if (AN.last) anRender(AN.last); },
+  lvChart: function(){ if (LV.last) anLiveBars(LV.last); }
+};
+function chartMarkRect(b, padT, ih){
+  return '<rect x="' + (b.x0 - 0.5).toFixed(2) + '" y="' + padT + '" width="' + Math.max(b.x1 - b.x0 + 1, 1).toFixed(2) + '" height="' + ih + '" fill="#f59e0b" fill-opacity="0.22" stroke="#f59e0b" stroke-width="0.8" pointer-events="none"/>';
+}
+function chartTipEl(){ return document.getElementById('chart' + 'Tip'); }
+function chartTipSync(svg){
+  var tip = chartTipEl(); if (!tip) return;
+  if (tip.style.display !== 'block') return;
+  if (!svg || svg.__sel == null || !svg.__bars || !svg.__bars[svg.__sel]) { tip.style.display = 'none'; return; }
+  tip.innerHTML = svg.__bars[svg.__sel].tip;
+}
+function chartHideTip(){ var t = chartTipEl(); if (t) t.style.display = 'none'; }
+function chartSvgPoint(svg, ev){
+  var r = svg.getBoundingClientRect();
+  var vb = (svg.getAttribute('viewBox') || '').split(/\s+/);
+  var vw = parseFloat(vb[2]) || r.width;
+  return { x: (ev.clientX - r.left) / (r.width || 1) * vw, w: vw };
+}
+function chartSelectPoint(svgId, pt){
+  var svg = document.getElementById(svgId); if (!svg) return;
+  var bars = svg.__bars || []; if (!bars.length) return;
+  var idx = -1, i, bd = 1e9;
+  for (i = 0; i < bars.length; i++){
+    if (pt.x >= bars[i].x0 - 0.6 && pt.x <= bars[i].x1 + 0.6) { idx = i; break; }
+  }
+  if (idx < 0){                                  // 柱子很细，落到空白就取最近一根
+    for (i = 0; i < bars.length; i++){
+      var d = Math.abs((bars[i].x0 + bars[i].x1) / 2 - pt.x);
+      if (d < bd) { bd = d; idx = i; }
+    }
+  }
+  if (idx < 0) return;
+  svg.__sel = idx;
+  if (CHART_REDRAW[svgId]) CHART_REDRAW[svgId]();   // 重画一次以显示选中高亮
+  var hb = (svg.__bars || [])[idx]; if (!hb) return;
+  var tip = chartTipEl(); if (!tip) return;
+  tip.innerHTML = hb.tip;
+  tip.style.display = 'block';
+  var r = svg.getBoundingClientRect();
+  var vb = (svg.getAttribute('viewBox') || '').split(/\s+/);
+  var vw = parseFloat(vb[2]) || r.width;
+  var sc = r.width / (vw || 1);
+  var cx = r.left + ((hb.x0 + hb.x1) / 2) * sc;
+  var tw = tip.offsetWidth, th = tip.offsetHeight;
+  var x = cx - tw / 2;
+  if (x < 6) x = 6;
+  if (x + tw > window.innerWidth - 6) x = window.innerWidth - 6 - tw;
+  var y = r.top + 10;
+  if (y + th > window.innerHeight - 6) y = window.innerHeight - 6 - th;
+  if (y < 6) y = 6;
+  tip.style.left = x + 'px';
+  tip.style.top = y + 'px';
+}
+function chartBindTap(svgId){
+  var svg = document.getElementById(svgId); if (!svg) return;
+  svg.addEventListener('click', function(ev){
+    var now = Date.now();
+    if (chartTapTimer) { clearTimeout(chartTapTimer); chartTapTimer = null; }
+    if (now - chartLastTap < 300){                 // 双击 → 进/退全屏
+      chartLastTap = 0;
+      chartToggleFs(svgId);
+      return;
+    }
+    chartLastTap = now;
+    var pt = chartSvgPoint(svg, ev);
+    chartTapTimer = setTimeout(function(){          // 单击延后，等双击来取消
+      chartTapTimer = null;
+      chartSelectPoint(svgId, pt);
+    }, 300);
+  });
+}
+function chartLockLand(){ try { if (screen.orientation && screen.orientation.lock) { var p = screen.orientation.lock('landscape'); if (p && p.catch) p.catch(function(){}); } } catch (e) {} }
+function chartUnlockLand(){ try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch (e) {} }
+function chartNativeFs(on){
+  try { if (window.SeeBridge && SeeBridge.setChartFs) { SeeBridge.setChartFs(!!on); return; } } catch (e) {}
+  try {
+    if (on){
+      var el = document.documentElement;
+      var rf = el.requestFullscreen || el.webkitRequestFullscreen;
+      if (rf) { var pr = rf.call(el); if (pr && pr.then) pr.then(chartLockLand, function(){}); else chartLockLand(); }
+      else chartLockLand();
+    } else {
+      chartUnlockLand();
+      if (document.fullscreenElement || document.webkitFullscreenElement){
+        var xf = document.exitFullscreen || document.webkitExitFullscreen;
+        if (xf) { var pr2 = xf.call(document); if (pr2 && pr2.catch) pr2.catch(function(){}); }
+      }
+    }
+  } catch (e) {}
+}
+function chartToggleFs(svgId){
+  if (CHART_FS === svgId) { seeExitChartFs(); return; }
+  if (CHART_FS) seeExitChartFs();
+  var svg = document.getElementById(svgId); if (!svg) return;
+  CHART_FS = svgId;
+  document.body.classList.add('chartfs');
+  svg.classList.add('chart-fs');
+  var b = document.getElementById('chartFsBtn'); if (b) b.style.display = 'block';
+  chartHideTip();
+  if (CHART_REDRAW[svgId]) CHART_REDRAW[svgId]();
+  chartNativeFs(true);
+}
+function seeExitChartFs(){
+  var id = CHART_FS; if (!id) return;
+  CHART_FS = '';
+  var svg = document.getElementById(id);
+  if (svg) { svg.classList.remove('chart-fs'); svg.__sel = null; }
+  document.body.classList.remove('chartfs');
+  var b = document.getElementById('chartFsBtn'); if (b) b.style.display = 'none';
+  chartHideTip();
+  if (CHART_REDRAW[id]) CHART_REDRAW[id]();
+  chartNativeFs(false);
+}
+window.seeExitChartFs = seeExitChartFs;
+document.addEventListener('click', function(ev){
+  var t = ev.target;
+  if (t && t.closest && t.closest('.chart-svg')) return;
+  if (t && t.id === 'chartFsBtn') return;
+  chartHideTip();
+}, true);
+document.addEventListener('keydown', function(ev){ if (ev.key === 'Escape' && CHART_FS) seeExitChartFs(); });
+window.addEventListener('resize', function(){ if (CHART_FS && CHART_REDRAW[CHART_FS]) CHART_REDRAW[CHART_FS](); });
+document.addEventListener('fullscreenchange', function(){ if (!document.fullscreenElement && CHART_FS) seeExitChartFs(); });
+function chartInit(){ chartBindTap('anChart'); chartBindTap('lvChart'); }
+chartInit();
+
 checkSession().then(function(){ boot(); });
 </script>
+<div id="chartFsBtn" onclick="seeExitChartFs()">✕ 退出全屏</div>
+<div id="chartTip"></div>
 <div id="loginMask" style="display:none;position:fixed;inset:0;z-index:99;background:rgba(15,23,42,.55);align-items:center;justify-content:center">
   <div class="lgbx">
     <div class="lgico" id="loginIco">🔒</div>
