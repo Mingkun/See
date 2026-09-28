@@ -99,6 +99,8 @@
   .h2 { font-size:var(--fs-lg); font-weight:650; }
   .link { display:inline-block; margin-top:var(--sp-1); font-size:var(--fs-md); color:var(--brand); }
   .c-brand { color:var(--brand); } .c-warn { color:var(--warn); } .c-ok { color:var(--ok); }
+  /* 分时用量状态色：繁忙=橘红、放松=绿、空闲=灰 */
+  .c-busy { color:#ea580c; } .c-chill { color:var(--ok); } .c-idle { color:var(--muted); }
   .c-danger { color:var(--danger); } .c-muted { color:var(--muted); }
 
   /* 登录窗 */
@@ -1356,7 +1358,8 @@ function anLoad(){
     .then(function(j){ if (!j || !j.ok) { document.getElementById('anSub').textContent = '❌ ' + ((j && j.error) || '失败'); return; } anRender(j); anLiveLoad(); })
     .catch(function(){ document.getElementById('anSub').textContent = '服务器连接失败'; });
 }
-var AN_THR = 4096;
+var AN_THR = 4096;        // 空闲阈值（平均速率，用于空闲时段统计）
+var AN_BUSY = 1048576;    // 分时用量「繁忙」阈值：峰值 ≥ 1 M/s
 function anDayLbl(sec){ var d = new Date(sec * 1000); return (d.getMonth() + 1) + '-' + d.getDate(); }
 function anHMin(sec){ var d = new Date(sec * 1000); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
 function anFmtDur(min){ if (min < 60) return Math.round(min) + '分'; return Math.floor(min / 60) + '时' + (Math.round(min % 60) ? Math.round(min % 60) + '分' : ''); }
@@ -1437,7 +1440,11 @@ function anRender(j){
   for (var h3 = 0; h3 < nh; h3++){
     var tot = 0, mx = 0, ct2 = 0, any2 = 0, pr2 = 0;
     for (var k2 = h3 * 60; k2 < (h3 + 1) * 60; k2++){ if (hs[k2]) any2 = 1; if (pr[k2]) pr2 = 1; tot += sp[k2]; if (sp[k2] > mx) mx = sp[k2]; ct2++; }
-    var st = !any2 ? '<span class="sub">无</span>' : ((!pr2 || tot / ct2 < AN_THR) ? '<span class="c-warn">空闲</span>' : '<span class="c-ok">有</span>');
+    var st;
+    if (!any2) st = '<span class="sub">无</span>';
+    else if (mx >= AN_BUSY) st = '<span class="c-busy">繁忙</span>';
+    else if (mx > 0) st = '<span class="c-chill">放松</span>';
+    else st = '<span class="c-idle">空闲</span>';
     var t0 = from + h3 * 3600, t1 = t0 + 3600;
     // 行序即时间先后（由早到晚，索引 0 为窗口起点）
     var hlbl = anHMin(t0) + '–' + anHMin(t1);
