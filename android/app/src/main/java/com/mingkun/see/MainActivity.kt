@@ -20,15 +20,36 @@ class MainActivity : Activity() {
     private var filePathCallback: android.webkit.ValueCallback<Array<android.net.Uri>>? = null
     private var updateDownloadId = -1L
     private var pendingApkName: String? = null
+    private var pendingApkSize = 0L
+    private var pendingApkMd5 = ""
+
+    private fun toast(msg: String) {
+        try { android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_LONG).show() } catch (_: Exception) {}
+    }
+
+    private fun md5Of(f: java.io.File): String {
+        return try {
+            val md = java.security.MessageDigest.getInstance("MD5")
+            f.inputStream().use { ins ->
+                val buf = ByteArray(1 shl 16)
+                while (true) {
+                    val n = ins.read(buf)
+                    if (n <= 0) break
+                    md.update(buf, 0, n)
+                }
+            }
+            md.digest().joinToString("") { "%02x".format(it) }
+        } catch (_: Exception) { "" }
+    }
 
     inner class Bridge {
         @android.webkit.JavascriptInterface
-        fun confirmUpdate(ver: String, url: String) {
+        fun confirmUpdate(ver: String, url: String, size: Double, md5: String) {
             runOnUiThread {
                 android.app.AlertDialog.Builder(this@MainActivity)
                     .setTitle("发现新版本")
                     .setMessage("see v" + ver + " 可用，下载并安装？")
-                    .setPositiveButton("下载") { _, _ -> downloadAndInstall(ver, url) }
+                    .setPositiveButton("下载") { _, _ -> downloadAndInstall(ver, url, size.toLong(), md5 ?: "") }
                     .setNegativeButton("取消", null)
                     .show()
             }
@@ -48,9 +69,13 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun downloadAndInstall(ver: String, url: String) {
-        val dest = "see-update-" + ver.replace(Regex("[^0-9A-Za-z._-]"), "_") + ".apk"
+    private fun downloadAndInstall(ver: String, url: String, size: Long = 0L, md5: String = "") {
+        // 文件名带上时间戳：DownloadManager 遇到已存在的同名目标会静默失败，
+        // 之后通知栏/回调一旦点到那个半截旧包，系统就报「解析包时出现问题」。
+        val dest = "see-update-" + ver.replace(Regex("[^0-9A-Za-z._-]"), "_") + "-" + System.currentTimeMillis() + ".apk"
         pendingApkName = dest
+        pendingApkSize = if (size > 0) size else 0L
+        pendingApkMd5 = (md5 ?: "").trim().lowercase()
         purgeStaleApks(dest)
         try {
             val request = android.app.DownloadManager.Request(android.net.Uri.parse(url))
@@ -68,11 +93,38 @@ class MainActivity : Activity() {
 
     private fun openDownloadedApk() {
         try {
+            // 先看 DownloadManager 自己的结论：没下成功就别把半截包丢给安装器。
+            var status = -1
+            try {
+                val dm = getSystemService(DOWNLOAD_SERVICE) as android.app.DownloadManager
+                dm.query(android.app.DownloadManager.Query().setFilterById(updateDownloadId))?.use { c ->
+                    if (c.moveToFirst()) status = c.getInt(c.getColumnIndexOrThrow(android.app.DownloadManager.COLUMN_STATUS))
+                }
+            } catch (_: Exception) {}
+            if (status != android.app.DownloadManager.STATUS_SUCCESSFUL) {
+                toast("下载没完成，请稍后重试")
+                return
+            }
             val dir = getExternalFilesDir(null) ?: return
             val file = (pendingApkName?.let { java.io.File(dir, it) })?.takeIf { it.exists() }
                 ?: dir.listFiles()?.filter { it.name.startsWith("see-update") && it.name.endsWith(".apk") }
                     ?.maxByOrNull { it.lastModified() }
             if (file == null || !file.exists()) return
+            // 再自己验一遍：大小 + md5（拿不到就只验大小）。不匹配就删掉重下，
+            // 否则系统安装器会直接报「解包/解析包时出现问题」。
+            if (pendingApkSize > 0 && file.length() != pendingApkSize) {
+                try { file.delete() } catch (_: Exception) {}
+                toast("安装包不完整（" + file.length() + "/" + pendingApkSize + " 字节），已删除，请重新下载")
+                return
+            }
+            if (pendingApkMd5.isNotEmpty()) {
+                val got = md5Of(file)
+                if (got.isNotEmpty() && got != pendingApkMd5) {
+                    try { file.delete() } catch (_: Exception) {}
+                    toast("安装包校验不通过（md5 不符），已删除，请重新下载")
+                    return
+                }
+            }
             val uri = androidx.core.content.FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
             val install = android.content.Intent(android.content.Intent.ACTION_VIEW)
             install.setDataAndType(uri, "application/vnd.android.package-archive")

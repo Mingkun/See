@@ -560,7 +560,7 @@ function checkUpdate(){
       if(!d || !d.versionCode){ o.textContent='获取版本信息失败'; return; }
       if(Number(d.versionCode) > Number(SEE_VERCODE||0)){
         o.textContent = '发现新版本 v'+d.versionName;
-        if(window.SeeBridge && SeeBridge.confirmUpdate){ SeeBridge.confirmUpdate(String(d.versionName), String(d.apkUrl)); o.textContent='版本 v'+d.versionName+'：确认后开始下载，完成后自动弹出安装'; }
+        if(window.SeeBridge && SeeBridge.confirmUpdate){ SeeBridge.confirmUpdate(String(d.versionName), String(d.apkUrl), Number(d.size||0), String(d.md5||'')); o.textContent='版本 v'+d.versionName+'：确认后开始下载，完成后自动弹出安装'; }
         else o.textContent='请用浏览器下载：'+d.apkUrl;
       } else o.textContent='已是最新版本（v'+(d.versionName||'')+'）';
     })
