@@ -115,7 +115,28 @@ python3 /opt/see/see_collector.py --key-file /etc/see/api-key --once --no-upload
 ```
 - `devkey` = 设备 **IP**（网关的 `pc1/wifi1` 是槽位会漂移，不能用）
 - `present=1` 在场；设备从网关表消失后 **25 小时内**继续补 `present=0`（休眠/离线看得出来）
-- 每 10 秒采一轮、每 60 秒批量上传；上传失败会保留缓冲下次重传
+- 每 10 秒采一轮、每 10 秒批量上传（`--upload-every` 默认=采样间隔，实时卡片才不会慢半分钟）；上传失败会保留缓冲下次重传
+
+## 更新采集器（微服上怎么拿到新版）
+
+微服（懒猫 LightOS 实例）里没法直接读见服务的仓库，所以脚本**同步了一份到网页下载目录**：
+
+```
+https://5130599.best/see/downloads/see_collector.py
+```
+
+微服上原地升级（会先备份旧的）：
+
+```bash
+sudo cp /opt/see/see_collector.py /opt/see/see_collector.py.bak
+sudo curl -fsSL https://5130599.best/see/downloads/see_collector.py -o /opt/see/see_collector.py
+sudo chmod 755 /opt/see/see_collector.py
+sudo systemctl restart see-collector
+journalctl -u see-collector -n 5 --no-pager
+```
+
+> **改 `see_collector.py` 后必须重跑一次**：`cp deploy/collector/see_collector.py static/downloads/see_collector.py`
+> 否则网页下载的还是旧版，微服上装了个寂寞。
 
 ## ⚠️ 两个采集器会打架
 
