@@ -778,6 +778,61 @@ def api_gw_series():
                    speed=speed, present=pres, has=has)
 
 
+@app.route('/api/gw/live', methods=['OPTIONS', 'GET'])
+def api_gw_live():
+    """分析页「实时」卡片：选定终端最近几分钟的逐条采样（上/下行分开）。
+
+    新鲜度只看两个数：采样间隔（默认 10 秒）和上传间隔（默认 10 秒），
+    所以最坏也就十几秒。这里把原始逐条采样直接回给前端，前端每 3 秒轮一次。
+    """
+    if request.method == 'OPTIONS':
+        return _opt('GET, OPTIONS')
+    if _auth_kind() is None:
+        return _deny()
+    key = (request.args.get('dev') or '').strip()
+    if not key:
+        return jsonify(ok=False, error='未指定设备'), 400
+    try:
+        secs = int(float(request.args.get('secs', 300)))
+    except Exception:  # noqa: BLE001
+        secs = 300
+    secs = max(60, min(secs, 3600))
+    now = int(time.time())
+    try:
+        rows = store.gw_series(key, now - secs, now + 1)
+    except Exception as e:  # noqa: BLE001
+        return jsonify(ok=False, error='读取采样失败：%s' % str(e)[:120]), 500
+    name = ''
+    ip = ''
+    try:
+        for k in store.gw_keys(now - 7 * 86400):
+            if k['key'] == key:
+                name = k.get('name') or ''
+                ip = k.get('ip') or ''
+                break
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        link = store.gw_last_link().get(key, '')
+    except Exception:  # noqa: BLE001
+        link = ''
+    samples = [[int(r['ts']), float(r['up'] or 0), float(r['down'] or 0),
+                1 if r['present'] else 0] for r in rows]
+    on = [s for s in samples if s[3]]
+    last = samples[-1] if samples else None
+    return jsonify(ok=True, now=now, key=key, name=name, ip=ip, link=link, win=secs,
+                   n=len(samples), on_n=len(on),
+                   ts=(last[0] if last else 0),
+                   age=((now - last[0]) if last else -1),
+                   present=(last[3] if last else 0),
+                   up=(last[1] if last else 0.0), down=(last[2] if last else 0.0),
+                   avg_up=(sum(s[1] for s in on) / len(on) if on else 0.0),
+                   avg_down=(sum(s[2] for s in on) / len(on) if on else 0.0),
+                   peak_up=(max(s[1] for s in on) if on else 0.0),
+                   peak_down=(max(s[2] for s in on) if on else 0.0),
+                   samples=samples)
+
+
 def _parse_bytes(txt):
     import re
     if not txt:

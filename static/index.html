@@ -193,6 +193,16 @@
 
   /* 图表 */
   .chart-svg { width:100%; height:200px; display:block; background:#fbfcfe; border:1px solid #eef1f6; border-radius:var(--r-2); }
+  /* 分析页「实时」卡片：两个速率格 + 镜像柱状图（中线以上下行、以下上行） */
+  .chart-live { height:112px; }
+  .lvrow { display:flex; gap:var(--sp-2); margin-bottom:var(--sp-2); }
+  .lvbox { flex:1; min-width:0; background:#f7f9fc; border:1px solid #eef1f6; border-radius:var(--r-2);
+           padding:7px var(--pad-x); }
+  .lvlab { font-size:var(--fs-sm); color:var(--muted); }
+  .lvval { font-size:var(--fs-xl); font-weight:650; font-variant-numeric:tabular-nums;
+           letter-spacing:-.2px; margin-top:1px; }
+  .lvsub { font-size:var(--fs-xs); color:var(--muted); margin-top:1px;
+           font-variant-numeric:tabular-nums; white-space:nowrap; }
   .legend { padding:6px var(--pad-x) 0; font-size:var(--fs-sm); color:var(--muted); }
   .chart { display:flex; align-items:flex-end; gap:1px; height:70px; margin:8px 0 2px; }
   .chart .b { flex:1; background:#bfdbfe; border-radius:1px 1px 0 0; position:relative; }
@@ -281,6 +291,25 @@
     <div class="pbody mt-1"><svg id="anChart" class="chart-svg"></svg></div>
     <div  class="sub legend"><span id="anAxisTxt">横轴 0–24 时</span> · 纵轴为下行+上行速率（对数显示）；<span class="c-muted">▬</span> 无数据 · <span class="c-muted">▬</span> 空闲 · <span class="c-brand">▬</span> 有流量</div>
     <div id="anLegend"  class="sub legend"></div>
+  </div>
+  <div class="panel" id="anLivePanel">
+    <div class="pt"><span>⚡ 实时速率<span class="sub sub-inline" id="anLiveDev">选定终端</span></span><span class="sub" id="anLiveAge">—</span></div>
+    <div class="pbody">
+      <div class="lvrow">
+        <div class="lvbox">
+          <div class="lvlab">↓ 下行</div>
+          <div class="lvval dn" id="lvDown">—</div>
+          <div class="lvsub" id="lvDownSub">—</div>
+        </div>
+        <div class="lvbox">
+          <div class="lvlab">↑ 上行</div>
+          <div class="lvval up" id="lvUp">—</div>
+          <div class="lvsub" id="lvUpSub">—</div>
+        </div>
+      </div>
+      <svg id="lvChart" class="chart-svg chart-live"></svg>
+    </div>
+    <div class="hint" id="lvHint">—</div>
   </div>
   <div class="panel" id="anSleepPanel" style="display:none">
     <div class="pt">😴 空闲<span class="sub sub-inline">（连续 ≥10 分钟无流量）</span></div>
@@ -372,7 +401,7 @@ function seeTab(w){
   document.getElementById('tabObs').style.color = w==='obs' ? '#2563eb' : '#69737f';
   document.getElementById('tabAn').style.color = w==='an' ? '#2563eb' : '#69737f';
   if (w==='obs') loadStatus();
-  if (w==='an') anInit();
+  if (w==='an') { anInit(); anLiveStart(); } else { anLiveStop(); }
 }
 </script>
 <div id="detail" class="modal" style="display:none">
@@ -1178,6 +1207,7 @@ function anKeys(){
         AN.devs = []; AN.key = '';
         if (lab) lab.textContent = '暂无采样数据';
         anDevItems();
+        anLiveStop(); anLiveReset();
         document.getElementById('anSub').textContent = '服务器上还没有采样数据 · 查微服采集器是否在跑（journalctl -u see-collector）';
         return;
       }
@@ -1192,13 +1222,110 @@ function anKeys(){
       anLoad();
     }).catch(function(){ document.getElementById('anSub').textContent = '服务器设备列表读取失败'; });
 }
+/* ---- 分析页「实时」卡片 ----
+   数据来自 /api/gw/live：采集器逐档（默认 10 秒）上报的原始采样，下行/上行分开。
+   卡片自己每 3 秒轮一次；新鲜度由「采样间隔 + 上传间隔」决定，所以标题栏标了「N 秒前」。 */
+var LV = { timer: null, busy: false, secs: 300 };
+var LV_STEP = 10;                 // 一档 = 10 秒（跟采集器采样间隔对齐）
+function anLiveVisible(){ var v = document.getElementById('viewAn'); return !!v && v.style.display !== 'none'; }
+function anLiveStart(){ if (!LV.timer) LV.timer = setInterval(function(){ if (anLiveVisible()) anLiveLoad(); }, 3000); }
+function anLiveStop(){ if (LV.timer){ clearInterval(LV.timer); LV.timer = null; } }
+function anLiveAgeText(j){
+  if (!j || !j.ts) return '还没有采样';
+  var a = j.age < 0 ? 0 : j.age;
+  if (a < 90) return a + ' 秒前';
+  if (a < 5400) return Math.round(a / 60) + ' 分钟前';
+  return (a / 3600).toFixed(1) + ' 小时前';
+}
+function anLiveLoad(){
+  if (LV.busy || !AN.key) return;
+  LV.busy = true;
+  apiFetch(API + '/gw/live?dev=' + encodeURIComponent(AN.key) + '&secs=' + LV.secs)
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      LV.busy = false;
+      if (j && j.ok) anLiveRender(j); else anLiveMsg('⚠ ' + ((j && j.error) || '读取失败'));
+    })
+    .catch(function(){ LV.busy = false; anLiveMsg('⚠ 服务器连接失败'); });
+}
+function anLiveMsg(t){ var h = document.getElementById('lvHint'); if (h) h.textContent = t; }
+function anLiveReset(){
+  var ids = ['lvDown', 'lvUp', 'lvDownSub', 'lvUpSub', 'anLiveAge'];
+  for (var i = 0; i < ids.length; i++){ var e = document.getElementById(ids[i]); if (e) e.textContent = '—'; }
+  var c = document.getElementById('lvChart'); if (c) c.innerHTML = '';
+}
+function anLiveRender(j){
+  var dl = document.getElementById('anLiveDev');
+  if (dl) dl.textContent = (j.name || j.ip || j.key || '') + (j.name && j.ip ? ' · ' + j.ip : '');
+  var ag = document.getElementById('anLiveAge'); if (ag) ag.textContent = anLiveAgeText(j);
+  var e1 = document.getElementById('lvDown'), e2 = document.getElementById('lvUp');
+  if (e1) e1.textContent = fmtSpeed(j.down);
+  if (e2) e2.textContent = fmtSpeed(j.up);
+  var s1 = document.getElementById('lvDownSub'), s2 = document.getElementById('lvUpSub');
+  if (s1) s1.textContent = '均 ' + fmtSpeed(j.avg_down) + ' · 峰 ' + fmtSpeed(j.peak_down);
+  if (s2) s2.textContent = '均 ' + fmtSpeed(j.avg_up) + ' · 峰 ' + fmtSpeed(j.peak_up);
+  var hint = [];
+  if (!j.n) hint.push('这台设备还没进这个窗口的采样');
+  else if (!j.on_n) hint.push('整个窗口里网关都标它不在线');
+  else if (!j.present) hint.push('最新一档不在线（刚断开或休眠）');
+  if (j.age >= 0 && j.age > 60) hint.push('数据 ' + j.age + ' 秒前才到服务器 · 微服采集器可能没跟上');
+  hint.push('中线以上=下行、以下=上行，两侧各自按窗口峰值缩放');
+  anLiveMsg(hint.join('；'));
+  anLiveBars(j);
+}
+function anLiveBars(j){
+  var svg = document.getElementById('lvChart'); if (!svg) return;
+  var W = svg.clientWidth || 320, H = svg.clientHeight || 112;
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+  var padL = 34, padR = 6, padT = 6, padB = 13;
+  var iw = W - padL - padR, ih = H - padT - padB, mid = padT + ih / 2;
+  var n = Math.max(1, Math.round((j.win || LV.secs) / LV_STEP));
+  var frm = (j.now || Math.floor(Date.now() / 1000)) - n * LV_STEP;
+  var slot = [];
+  for (var i = 0; i < n; i++) slot.push(null);
+  var ss = j.samples || [];
+  for (var k = 0; k < ss.length; k++){
+    var idx = Math.floor((ss[k][0] - frm) / LV_STEP);
+    if (idx < 0 || idx >= n) continue;
+    slot[idx] = ss[k];        // 同一档多条时取最后一条
+  }
+  var maxD = 1, maxU = 1;
+  for (var a = 0; a < n; a++){
+    if (!slot[a] || !slot[a][3]) continue;
+    if (slot[a][2] > maxD) maxD = slot[a][2];
+    if (slot[a][1] > maxU) maxU = slot[a][1];
+  }
+  var bw = iw / n, p = [];
+  p.push('<rect x="' + padL + '" y="' + padT + '" width="' + iw + '" height="' + ih + '" fill="#fbfcfe"/>');
+  for (var b = 0; b < n; b++){            // 缺档底纹：采集器没上报或暂停中
+    if (slot[b]) continue;
+    p.push('<rect x="' + (padL + b * bw).toFixed(2) + '" y="' + padT + '" width="' + Math.max(bw, 0.6).toFixed(2) + '" height="' + ih + '" fill="#eef2f7"/>');
+  }
+  for (var c = 0; c < n; c++){
+    var s2 = slot[c]; if (!s2) continue;
+    var x0 = padL + c * bw, w = Math.max(bw - 0.5, 0.8);
+    if (!s2[3]){
+      p.push('<rect x="' + x0.toFixed(2) + '" y="' + padT + '" width="' + w.toFixed(2) + '" height="' + ih + '" fill="#e6ebf3"/>');
+      continue;
+    }
+    var hd = (s2[2] / maxD) * (ih / 2), hu = (s2[1] / maxU) * (ih / 2);
+    if (hd > 0.4) p.push('<rect x="' + x0.toFixed(2) + '" y="' + (mid - hd).toFixed(1) + '" width="' + w.toFixed(2) + '" height="' + hd.toFixed(1) + '" fill="#2563eb" rx="0.6"/>');
+    if (hu > 0.4) p.push('<rect x="' + x0.toFixed(2) + '" y="' + mid.toFixed(1) + '" width="' + w.toFixed(2) + '" height="' + hu.toFixed(1) + '" fill="#f59e0b" rx="0.6"/>');
+  }
+  p.push('<line x1="' + padL + '" y1="' + mid.toFixed(1) + '" x2="' + (padL + iw) + '" y2="' + mid.toFixed(1) + '" stroke="#dfe5ee"/>');
+  p.push('<text x="' + (padL - 4) + '" y="' + (padT + 8) + '" font-size="8" fill="#9aa4b2" text-anchor="end">↓' + fmtSpeed(maxD) + '</text>');
+  p.push('<text x="' + (padL - 4) + '" y="' + (padT + ih - 1) + '" font-size="8" fill="#9aa4b2" text-anchor="end">↑' + fmtSpeed(maxU) + '</text>');
+  p.push('<text x="' + padL + '" y="' + (H - 3) + '" font-size="8" fill="#9aa4b2">' + anHMin(frm) + ' 前</text>');
+  p.push('<text x="' + (padL + iw) + '" y="' + (H - 3) + '" font-size="8" fill="#9aa4b2" text-anchor="end">现在</text>');
+  svg.innerHTML = p.join('');
+}
 function anLoad(){
   var hrs = AN.win || 24;
-  if (!AN.key) { document.getElementById('anSub').textContent = '请选择设备'; return; }
+  if (!AN.key) { document.getElementById('anSub').textContent = '请选择设备'; anLiveStop(); anLiveReset(); return; }
   document.getElementById('anSub').textContent = '加载中…';
   apiFetch(API + '/gw/series?dev=' + encodeURIComponent(AN.key) + '&hours=' + hrs)
     .then(function(r){ return r.json(); })
-    .then(function(j){ if (!j || !j.ok) { document.getElementById('anSub').textContent = '❌ ' + ((j && j.error) || '失败'); return; } anRender(j); })
+    .then(function(j){ if (!j || !j.ok) { document.getElementById('anSub').textContent = '❌ ' + ((j && j.error) || '失败'); return; } anRender(j); anLiveLoad(); })
     .catch(function(){ document.getElementById('anSub').textContent = '服务器连接失败'; });
 }
 var AN_THR = 4096;

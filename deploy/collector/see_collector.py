@@ -193,6 +193,7 @@ class Collector(object):
         self.cfg_ts = 0.0
         self.on_ts = 0.0          # 最近一次「只拉开关」的时间
         self.off_log = 0.0        # 暂停期间日志节流
+        self.up_log = 0.0         # 上传日志节流（间隔缩小后不然刷屏）
         self.links = {}          # ip -> wired/wifi（60s 缓存）
         self.link_ts = 0.0
 
@@ -360,7 +361,7 @@ class Collector(object):
             log('✓ 上传：%d 条' % n)
         return ok
 
-    def run(self, interval=10, upload_every=60, cfg_every=20):
+    def run(self, interval=10, upload_every=10, cfg_every=20):
         log('see 采集器启动：api=%s 采样 %ds / 上传 %ds / 开关 %ds'
             % (self.api, interval, upload_every, cfg_every))
         last_up = 0.0
@@ -381,7 +382,10 @@ class Collector(object):
                 if time.time() - last_up >= upload_every:
                     last_up = time.time()
                     n = self.flush()
-                    if n:
+                    # 上传间隔跟着采样间隔（默认 10s）后，这条日志会每 10 秒一行，
+                    # 所以节流：只有一条以上、或距上次打印过了一分钟才写。
+                    if n and (n > 1 or time.time() - self.up_log >= 60):
+                        self.up_log = time.time()
                         log('已上传 %d 条（buffer 余 %d）' % (n, len(self.buf)))
             except KeyboardInterrupt:
                 log('收到中断，退出')
@@ -402,7 +406,8 @@ def main():
     ap.add_argument('--gw-user', default='', help='覆盖配置里的网关账号')
     ap.add_argument('--gw-pass', default='', help='覆盖配置里的网关密码（建议用服务器配置，别写在这里）')
     ap.add_argument('--interval', type=int, default=10)
-    ap.add_argument('--upload-every', type=int, default=60)
+    ap.add_argument('--upload-every', type=int, default=10,
+                    help='多久上传一次（秒）；默认跟采样间隔一样，实时页才不会慢半分钟')
     ap.add_argument('--cfg-every', type=int, default=20, help='多久对一次采集开关（秒）')
     ap.add_argument('--once', action='store_true', help='只采一次（配合 --no-upload 排查）')
     ap.add_argument('--no-upload', action='store_true')
