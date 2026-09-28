@@ -203,6 +203,12 @@
            letter-spacing:-.2px; margin-top:1px; }
   .lvsub { font-size:var(--fs-xs); color:var(--muted); margin-top:1px;
            font-variant-numeric:tabular-nums; white-space:nowrap; }
+  /* 实时卡片标题栏：设备名 + IP 可能很长，别把右边的「N 秒前」挤到换行。
+     左半边内部改成 flex，设备名自己截断；右边时间禁止压缩、禁止折行。 */
+  #anLivePanel .pt > span:first-child { display:flex; align-items:baseline; gap:var(--sp-2); min-width:0; }
+  #anLivePanel .pt > span:first-child > span:first-child { flex:none; }
+  #anLiveDev { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-left:0; }
+  #anLiveAge { flex:none; white-space:nowrap; }
   .legend { padding:6px var(--pad-x) 0; font-size:var(--fs-sm); color:var(--muted); }
   .chart { display:flex; align-items:flex-end; gap:1px; height:70px; margin:8px 0 2px; }
   .chart .b { flex:1; background:#bfdbfe; border-radius:1px 1px 0 0; position:relative; }
