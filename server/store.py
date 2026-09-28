@@ -197,6 +197,12 @@ class Store:
                 ' GROUP BY devkey HAVING ts=MAX(ts)').fetchall()
         return {r['devkey']: r['link'] for r in rows}
 
+    def gw_last_ts(self):
+        """最近一次采样的时间戳（0=库里还没有任何采样），给「采集器还活着吗」用"""
+        with self._lock:
+            r = self._db.execute('SELECT MAX(ts) m FROM gw_samples').fetchone()
+        return int((r['m'] if r else 0) or 0)
+
     def prune_gw_samples(self, before):
         with self._lock:
             self._db.execute('DELETE FROM gw_samples WHERE ts<?', (int(before),))

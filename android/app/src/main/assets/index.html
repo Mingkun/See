@@ -311,6 +311,14 @@
     <div class="sub" id="sysVer">–</div>
     <button id="updBtn" onclick="checkUpdate()" class="btn mt-2">🔄 检查更新</button>
     <div id="updOut" class="sub mt-2"></div>
+    <div class="sec">采集器</div>
+    <div class="sub ml-0 mt-1" id="colState">读取中…</div>
+    <div class="row mt-2">
+      <button type="button" id="colPause30" onclick="colPause(30)" class="btn">⏸ 暂停 30 分钟</button>
+      <button type="button" id="colToggle" onclick="colToggle()" class="btn">⏸ 暂停</button>
+    </div>
+    <div class="sub ml-0 mt-1">暂停后家里的微服采集器会停止登录网关、停止上报（约 20 秒生效）；
+      这期间在这台设备上登录光猫，就不会被采集器顶下线了。忘记恢复也没事：「暂停 30 分钟」会自己恢复。</div>
     <div class="collect">
     <div class="sec">云端采集（微服）</div>
     <div class="sub ml-0 mt-1">手机端不再采集：网关数据由家里的微服采集器上报，app 只负责查看。这里配的是采集器登录网关的账号，以及它的总开关。</div>
@@ -326,7 +334,6 @@
     </div>
     <div class="row mt-2">
       <button type="button" onclick="gwSave()" class="btn">💾 保存配置</button>
-      <button type="button" id="gwOnBtn" onclick="gwCollect()" class="btn">📡 采集开关</button>
     </div>
     <div id="gwOut" class="sub mt-2"></div>
     </div>
@@ -498,7 +505,7 @@ loadStatus(); loadDevices(); loadEvents();
 setInterval(loadStatus,2000); setInterval(loadDevices,2000); setInterval(loadEvents,5000);
 setInterval(function(){ if(curIp) loadDetail(); },3000);
 var SEE_VERCODE = 0;
-function openSys(){ document.getElementById('sysPanel').style.display='flex'; loadSys(); }
+function openSys(){ document.getElementById('sysPanel').style.display='flex'; loadSys(); colLoad(); }
 function closeSys(){ document.getElementById('sysPanel').style.display='none'; }
 document.getElementById('sysPanel').addEventListener('click', function(e){ if(e.target===this) closeSys(); });
 function loadSys(){
@@ -811,7 +818,8 @@ function gwLoad(){
 }
 function gwPush(){
   try {
-    var body = { ip: GW.ip, user: GW.user, on: !!GW.on };
+    // 不带 on：采集总开关由「采集器」那一块单独管，免得保存配置时把暂停状态冲掉
+    var body = { ip: GW.ip, user: GW.user };
     body['pa' + 'ss'] = GW['pa' + 'ss'];
     apiFetch(CFG_URL, {
       method: 'POST',
@@ -832,24 +840,50 @@ function gwSave(){
   gwPush();
 }
 function gwShow(){ var p = document.getElementById('gwPanel'); if (p) p.style.display = ''; }
-function gwStart(){
-  // 旧名字保留（外部没引用，但避免旧缓存页面报错）
-  gwCollect();
+/* ---- 采集器开关（网页/App 共用；写的是服务器上的总开关）---- */
+var COL = { ok: false, on: true, offUntil: 0, age: -1 };
+function colLabel(){
+  var o = document.getElementById('colState'), b = document.getElementById('colToggle');
+  if (!o) return;
+  if (!COL.ok){ o.textContent = '读取失败（未登录或网络不通）。'; }
+  else if (!COL.on){
+    if (COL.offUntil > 0){
+      var m = Math.max(0, Math.round((COL.offUntil - Date.now() / 1000) / 60));
+      o.textContent = '⏸ 已暂停，约 ' + m + ' 分钟后自动恢复。';
+    } else { o.textContent = '⏸ 已暂停（需手动恢复）。'; }
+  } else if (COL.age < 0){
+    o.textContent = '● 已开启，但服务器还没有任何采样。';
+  } else if (COL.age > 180){
+    o.textContent = '⚠ 已开启，但微服已 ' + gwDur(COL.age) + '没上报（查懒猫实例）。';
+  } else {
+    o.textContent = '● 采样中 · 微服 ' + gwDur(COL.age) + '前上报';
+  }
+  if (b) b.textContent = COL.on ? '⏸ 暂停' : '▶ 恢复采集';
 }
-function gwCollect(){
-  // 只切服务器的采集开关：微服采集器每 5 分钟读一次它决定采不采
-  GW.on = !GW.on;
-  localStorage.setItem('gwCfg', JSON.stringify(GW));
-  gwPush();
-  gwBtnLabel();
-  var o = document.getElementById('gwOut');
-  if (o) o.textContent = GW.on ? '云端采集：已开启（微服会继续上报）' : '云端采集：已暂停';
+function colLoad(){
+  return apiFetch(CFG_URL, {}).then(function(r){ return r.json(); }).then(function(j){
+    if (!j || !j.ok) { COL.ok = false; colLabel(); return; }
+    var c = j.cfg || {};
+    COL.ok = true; COL.on = !!c.on; COL.offUntil = c.off_until || 0; COL.age = (j.sample_age == null ? -1 : j.sample_age);
+    colLabel();
+  }).catch(function(){ COL.ok = false; colLabel(); });
 }
-function gwStop(){ gwCollect(); }
-function gwBtnLabel(){
-  var b = document.getElementById('gwOnBtn');
-  if (b) b.textContent = GW.on ? '⏸ 暂停云端采集' : '▶ 开启云端采集';
+function colSet(on, offMin){
+  var o = document.getElementById('colState');
+  if (o) o.textContent = '正在写入…';
+  return apiFetch(CFG_URL, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ on: !!on, offMin: offMin || 0 })
+  }).then(function(r){ return r.json(); }).then(function(j){
+    if (j && j.ok && j.cfg){
+      COL.ok = true; COL.on = !!j.cfg.on; COL.offUntil = j.cfg.off_until || 0; colLabel();
+    } else { if (o) o.textContent = '⚠ 写入失败：' + ((j && j.error) || '未登录？'); }
+  }).catch(function(){ if (o) o.textContent = '⚠ 写入失败（网络错误）。'; });
 }
+function colPause(m){ colSet(false, m || 0); }
+function colToggle(){ colSet(!COL.on, COL.on ? 0 : 0); }
+function gwCollect(){ colToggle(); }
+function gwStop(){ colToggle(); }
 function gwDur(s){
   if (!s) return '—';
   if (s < 60) return s + '秒';

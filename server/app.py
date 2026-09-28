@@ -288,6 +288,30 @@ def _save_gwcfg(cfg):
     os.replace(tmp, CFG_PATH)
 
 
+OFF_MAX_MIN = 1440          # 「暂停 N 分钟」上限（24 小时）
+
+
+def _eff_on(cfg):
+    """采集总开关的有效值。
+
+    cfg.on=False 且 cfg.offUntil>0 表示「暂停到那个时间点自动恢复」；
+    到期后这里自动把 on 拧回 True 并清掉 offUntil（并落盘），
+    这样采集器不需要自己做定时逻辑，网页刷新也能看到已经恢复。
+    """
+    off = float(cfg.get('offUntil') or 0)
+    if cfg.get('on'):
+        if off:
+            cfg['offUntil'] = 0
+            _save_gwcfg(cfg)
+        return True
+    if off and time.time() >= off:
+        cfg['on'] = True
+        cfg['offUntil'] = 0
+        _save_gwcfg(cfg)
+        return True
+    return False
+
+
 # ---------- 鉴权：机器密钥（只给采集器）+ 网页会话（口令登录）----------
 # 背景：以前网页里内嵌一把万能密钥（谁看源码都能拿到）→ 能读到网关管理员密码。
 # 现在拆成两层：公开产物里一个密钥都不留；网页/App 靠用户口令换会话令牌。
@@ -590,17 +614,32 @@ def api_config():
     if request.method == 'GET':
         cfg = _load_gwcfg()
         # 只有采集器（机器密钥）能拿到明文密码；网页/App 只知道「有没有、几位」
-        return jsonify(ok=True, cfg=(cfg if kind == 'key' else _public_cfg(cfg)))
+        out = cfg if kind == 'key' else _public_cfg(cfg)
+        out['on'] = _eff_on(cfg)                 # 开关报「有效值」（自动恢复后就是 True）
+        out['off_until'] = int(float(cfg.get('offUntil') or 0))
+        last = store.gw_last_ts()
+        return jsonify(ok=True, cfg=out, now=int(time.time()),
+                       last_sample=last, sample_age=(int(time.time() - last) if last else -1))
     data = request.get_json(force=True, silent=True) or {}
     cfg = _load_gwcfg()
     for k in ('ip', 'user', 'on', 'anDev', 'anWin'):
         if k in data:
-            cfg[k] = data[k]
+            cfg[k] = bool(data[k]) if k == 'on' else data[k]
+    # offMin：暂停多少分钟后自动恢复（0 或没传 = 一直停到手动恢复）
+    try:
+        off_min = int(data.get('offMin') or 0)
+    except Exception:  # noqa: BLE001
+        off_min = 0
+    off_min = max(0, min(off_min, OFF_MAX_MIN))
+    cfg['offUntil'] = (time.time() + off_min * 60) if (not cfg.get('on') and off_min) else 0
     # 密码是「只写不读」：传空字符串表示不动它
     if (data.get('pass') or '') != '':
         cfg['pass'] = data['pass']
     _save_gwcfg(cfg)
-    return jsonify(ok=True, cfg=(cfg if kind == 'key' else _public_cfg(cfg)))
+    out = cfg if kind == 'key' else _public_cfg(cfg)
+    out['on'] = _eff_on(cfg)
+    out['off_until'] = int(float(cfg.get('offUntil') or 0))
+    return jsonify(ok=True, cfg=out)
 
 
 # ---------- 网关设备流量采样（app 上传 / 网页读取）----------
@@ -666,8 +705,23 @@ def api_gw_cred():
         return _deny()
     cfg = _load_gwcfg()
     return jsonify(ok=True, ip=cfg.get('ip') or '', user=cfg.get('user') or '',
-                   **{'pass': cfg.get('pass') or ''}, on=bool(cfg.get('on')),
+                   **{'pass': cfg.get('pass') or ''}, on=_eff_on(cfg),
                    anDev=cfg.get('anDev') or '', anWin=cfg.get('anWin') or 24)
+
+
+@app.route('/api/gw/on', methods=['OPTIONS', 'GET'])
+def api_gw_on():
+    """采集器专用的极简开关口：只回 on，不含任何凭据。
+
+    整配置（含密码）还是每 5 分钟拉一次；采集器另用这个口每 20 秒对一次，
+    这样「暂停/恢复」在最坏 20 秒内生效，而不是等 5 分钟。
+    """
+    if request.method == 'OPTIONS':
+        return _opt('GET, OPTIONS')
+    if _auth_kind() != 'key':
+        return _deny()
+    cfg = _load_gwcfg()
+    return jsonify(ok=True, on=_eff_on(cfg), now=int(time.time()))
 
 
 @app.route('/api/gw/keys', methods=['OPTIONS', 'GET'])

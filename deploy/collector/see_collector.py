@@ -191,6 +191,8 @@ class Collector(object):
         self.buf = []
         self.known = {}          # devkey -> (name, ip, last_seen_ts)
         self.cfg_ts = 0.0
+        self.on_ts = 0.0          # 最近一次「只拉开关」的时间
+        self.off_log = 0.0        # 暂停期间日志节流
         self.links = {}          # ip -> wired/wifi（60s 缓存）
         self.link_ts = 0.0
 
@@ -242,6 +244,22 @@ class Collector(object):
         self.cfg['pa' + 'ss'] = j.get('pa' + 'ss') or ''
         self.cfg_ts = time.time()
         return True
+
+    def poll_on(self):
+        """只拉总开关（/api/gw/on，不含凭据）。
+
+        整配置（含密码）仍旧 5 分钟一次；但「暂停/恢复」要立刻生效，
+        否则暂停后还要等最坏 5 分钟才生效，那这个开关就没用了。
+        老服务器没这个口时静默忽略（退回 5 分钟一轮）。
+        """
+        try:
+            st, txt = self.http.get(self.api + '/api/gw/on', {'X-See-Key': self.key})
+            j = json.loads(txt or '{}')
+        except Exception:  # noqa: BLE001
+            return
+        self.on_ts = time.time()
+        if isinstance(j, dict) and j.get('ok'):
+            self.cfg['on'] = bool(j.get('on'))
 
     def gateway(self):
         ip = self.gw_ip or self.cfg.get('ip') or '192.168.1.1'
@@ -342,18 +360,23 @@ class Collector(object):
             log('✓ 上传：%d 条' % n)
         return ok
 
-    def run(self, interval=10, upload_every=60):
-        log('see 采集器启动：api=%s 采样 %ds / 上传 %ds' % (self.api, interval, upload_every))
+    def run(self, interval=10, upload_every=60, cfg_every=20):
+        log('see 采集器启动：api=%s 采样 %ds / 上传 %ds / 开关 %ds'
+            % (self.api, interval, upload_every, cfg_every))
         last_up = 0.0
         while True:
             try:
                 if time.time() - self.cfg_ts > 300:
                     self.refresh_cfg()
+                elif time.time() - self.on_ts > cfg_every:
+                    self.poll_on()
                 if self.enabled:
                     self.sample_once()
                 else:
-                    log('采集开关关闭或密码为空，跳过（等待配置变化）')
-                    time.sleep(15)
+                    if time.time() - self.off_log > 300:
+                        self.off_log = time.time()
+                        log('采集开关关闭（等待开启，每 %ds 对一次开关）' % cfg_every)
+                    time.sleep(5)
                     continue
                 if time.time() - last_up >= upload_every:
                     last_up = time.time()
@@ -380,6 +403,7 @@ def main():
     ap.add_argument('--gw-pass', default='', help='覆盖配置里的网关密码（建议用服务器配置，别写在这里）')
     ap.add_argument('--interval', type=int, default=10)
     ap.add_argument('--upload-every', type=int, default=60)
+    ap.add_argument('--cfg-every', type=int, default=20, help='多久对一次采集开关（秒）')
     ap.add_argument('--once', action='store_true', help='只采一次（配合 --no-upload 排查）')
     ap.add_argument('--no-upload', action='store_true')
     ap.add_argument('--selfcheck', action='store_true')
@@ -411,7 +435,7 @@ def main():
         return 0
     if not c.refresh_cfg():
         log('首次读配置失败，仍继续（会周期性重试）')
-    return c.run(a.interval, a.upload_every)
+    return c.run(a.interval, a.upload_every, a.cfg_every)
 
 
 if __name__ == '__main__':
