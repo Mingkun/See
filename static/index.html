@@ -401,7 +401,14 @@
     <div class="row mt-2"><button type="button" onclick="chPass()" class="btn">🔑 修改口令</button></div>
     <div id="pwOut" class="sub mt-1"></div>
     <div class="sec">客户端下载</div>
-    <a href="https://5130599.best/see/downloads/see-android.apk" class="link">⬇ 最新版 APK（浏览器打开）</a>
+    <div class="sub ml-0 mt-1">地址可直接长按选中复制；也可以点下面「📋 复制链接」。</div>
+    <input id="dlUrl" class="inp mt-1" style="width:100%;" readonly value="https://5130599.best/see/downloads/see-android.apk"
+           onclick="this.select()" onfocus="this.select()">
+    <div class="row mt-2">
+      <button type="button" id="dlCopy" onclick="copyDlUrl()" class="btn primary">📋 复制链接</button>
+      <a href="https://5130599.best/see/downloads/see-android.apk" target="_blank" rel="noopener" style="text-decoration:none;" class="btn ghost">⬇ 打开下载</a>
+    </div>
+    <div id="dlOut" class="sub mt-1"></div>
   </div>
 </div>
   </div>
@@ -820,6 +827,20 @@ function chPass(){
       } else { say('❌ '+((x.j && x.j.error) || ('HTTP '+x.s)), false); }
     })
     .catch(function(){ say('❌ 请求失败', false); });
+}
+function copyDlUrl(){
+  var el = document.getElementById('dlUrl'); if (!el) return;
+  var out = document.getElementById('dlOut');
+  var url = el.value;
+  function done(ok){ if (out) out.textContent = ok ? '链接已复制，可直接粘贴分享' : '复制失败，请长按上面的地址手动复制'; }
+  try {
+    el.removeAttribute('readonly'); el.select(); el.setSelectionRange(0, 9999);
+    var ok = document.execCommand('copy'); el.setAttribute('readonly','readonly'); done(!!ok);
+  } catch(e) {
+    try {
+      navigator.clipboard.writeText(url).then(function(){ done(true); }, function(){ done(false); });
+    } catch(e2) { done(false); }
+  }
 }
 function copyMc(){
   var el = document.getElementById('mcKey');
