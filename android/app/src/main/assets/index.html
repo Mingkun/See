@@ -313,7 +313,7 @@
       <button type="button" onclick="anLoad()" class="btn">刷新</button>
     </div>
     <div class="pbody mt-1"><svg id="anChart" class="chart-svg"></svg></div>
-    <div  class="sub legend"><span id="anAxisTxt">横轴 0–24 时</span> · 纵轴为下行+上行速率（对数显示），柱色按峰值分档，柱内横线上方上行、下方下行；<span class="c-busy">▬</span> 繁忙 · <span class="c-chill">▬</span> 轻量 · <span class="c-idle">▬</span> 空闲 · <span class="c-muted">▬</span> 无数据</div>
+    <div  class="sub legend"><span id="anAxisTxt">横轴 0–24 时</span> · 纵轴为下行+上行速率（对数显示），柱色按峰值分档，柱内横线上方上行、下方下行；浅黄虚线 = 下行峰值 1 M/s；<span class="c-busy">▬</span> 繁忙 · <span class="c-chill">▬</span> 轻量 · <span class="c-idle">▬</span> 空闲 · <span class="c-muted">▬</span> 无数据</div>
     <div id="anLegend"  class="sub legend"></div>
   </div>
   <div class="panel" id="anLivePanel">
@@ -1459,6 +1459,12 @@ function anRender(j){
       else p.push('<rect x="' + x0.toFixed(2) + '" y="' + ytop.toFixed(1) + '" width="' + rw + '" height="' + hTot.toFixed(1) + '" fill="' + tfill + '" rx="0.6"' + curCls + '/>');
     }
     else p.push('<rect x="' + x0.toFixed(2) + '" y="' + (padT + ih - 2) + '" width="' + rw + '" height="2" fill="' + tfill + '"' + curCls + '/>');
+  }
+  // 下行峰值参考线：1 M/s（浅黄虚线，只在量程能装下时画，否则贴顶会误导）
+  if (maxV >= AN_BUSY){
+    var yRef = yv(AN_BUSY), labY = (yRef - padT < 10) ? yRef + 9 : yRef - 3;
+    p.push('<line x1="' + padL + '" y1="' + yRef.toFixed(1) + '" x2="' + (padL + iw) + '" y2="' + yRef.toFixed(1) + '" stroke="#e8c94f" stroke-width="1.2" stroke-dasharray="4 3" pointer-events="none"/>');
+    p.push('<text x="' + (padL + iw - 1).toFixed(1) + '" y="' + labY.toFixed(1) + '" font-size="8" fill="#c2a52f" text-anchor="end" pointer-events="none">下行峰值 1 M/s</text>');
   }
   if (svg.__sel != null && bars[svg.__sel]) p.push(chartMarkRect(bars[svg.__sel], padT, ih));
   svg.__bars = bars;
