@@ -1361,15 +1361,17 @@ function anLiveBars(j){
     var bt = !s2 ? ('<b>' + lbl + '</b><br>无数据')
            : (!s2[3] ? ('<b>' + lbl + '</b><br>不在线')
                      : ('<b>' + lbl + '</b><br>↑ ' + fmtSpeed(s2[1]) + ' · ↓ ' + fmtSpeed(s2[2])));
-    bars.push({ x0: x0, x1: x0 + bw, tip: bt });
+    var hd = (s2 && s2[3]) ? (s2[2] / maxD) * (ih / 2) : 0;
+    var hu = (s2 && s2[3]) ? (s2[1] / maxU) * (ih / 2) : 0;
+    var hUp = hu > 0.4, hDn = hd > 0.4;
+    bars.push({ x0: x0, x1: x0 + bw, yT: (hUp || hDn) ? mid - (hUp ? hu : 0) : null, yB: (hUp || hDn) ? mid + (hDn ? hd : 0) : null, tip: bt });
     if (!s2) continue;
     if (!s2[3]){
       p.push('<rect x="' + x0.toFixed(2) + '" y="' + padT + '" width="' + w.toFixed(2) + '" height="' + ih + '" fill="#e6ebf3"/>');
       continue;
     }
-    var hd = (s2[2] / maxD) * (ih / 2), hu = (s2[1] / maxU) * (ih / 2);
-    if (hu > 0.4) p.push('<rect x="' + x0.toFixed(2) + '" y="' + (mid - hu).toFixed(1) + '" width="' + w.toFixed(2) + '" height="' + hu.toFixed(1) + '" fill="#f59e0b" rx="0.6"/>');
-    if (hd > 0.4) p.push('<rect x="' + x0.toFixed(2) + '" y="' + mid.toFixed(1) + '" width="' + w.toFixed(2) + '" height="' + hd.toFixed(1) + '" fill="#2563eb" rx="0.6"/>');
+    if (hUp) p.push('<rect x="' + x0.toFixed(2) + '" y="' + (mid - hu).toFixed(1) + '" width="' + w.toFixed(2) + '" height="' + hu.toFixed(1) + '" fill="#f59e0b" rx="0.6"/>');
+    if (hDn) p.push('<rect x="' + x0.toFixed(2) + '" y="' + mid.toFixed(1) + '" width="' + w.toFixed(2) + '" height="' + hd.toFixed(1) + '" fill="#2563eb" rx="0.6"/>');
   }
   p.push('<line x1="' + padL + '" y1="' + mid.toFixed(1) + '" x2="' + (padL + iw) + '" y2="' + mid.toFixed(1) + '" stroke="#dfe5ee"/>');
   p.push('<text x="' + (padL - 4) + '" y="' + (padT + 8) + '" font-size="8" fill="#d97706" text-anchor="end">↑' + fmtSpeed(maxU) + '</text>');
@@ -1445,14 +1447,14 @@ function anRender(j){
     // 「不在线」在四档图例里并入「无数据」；未到时间的格子不计入任何档
     if (curG < 0 || g <= curG) durMin[tier === 'off' ? 'none' : tier] += G;
     var avUp = (upA && c) ? su / c : av / 2, avDn = (dnA && c) ? sd / c : av / 2;
-    bars.push({ x0: x0, x1: x0 + bw, tip: (isCur ? '⏱ 当前时段<br>' : '') + '<b>' + anHMin(t0) + '–' + anHMin(t1) + '</b><br>峰 ' + fmtSpeed(pk) + '（合计，柱高）· ' + stt + '<br>均 ' + fmtSpeed(av) + '（下 ' + fmtSpeed(avDn) + ' · 上 ' + fmtSpeed(avUp) + '）' });
+    var ytop = (pk > 0) ? yv(pk) : null;   // 有真实柱子时记下柱顶，详情卡片靠它避让
+    bars.push({ x0: x0, x1: x0 + bw, yT: ytop, yB: padT + ih, tip: (isCur ? '⏱ 当前时段<br>' : '') + '<b>' + anHMin(t0) + '–' + anHMin(t1) + '</b><br>峰 ' + fmtSpeed(pk) + '（合计，柱高）· ' + stt + '<br>均 ' + fmtSpeed(av) + '（下 ' + fmtSpeed(avDn) + ' · 上 ' + fmtSpeed(avUp) + '）' });
     var rw = Math.max(bw - 0.4, 0.6).toFixed(2), fw = Math.max(bw, 0.6).toFixed(2);
     var curCls = isCur ? ' class="curblink"' : '';
     if (!any) p.push('<rect x="' + x0.toFixed(2) + '" y="' + padT + '" width="' + fw + '" height="' + ih + '" fill="#e9edf3"' + curCls + '/>');
     else if (!pres) p.push('<rect x="' + x0.toFixed(2) + '" y="' + padT + '" width="' + fw + '" height="' + ih + '" fill="#d7e4ff"' + curCls + '/>');
     else if (pk > 0){
       // 柱高 = 该格合计峰值（不再按均值、也不再分上下行两段）
-      var ytop = yv(pk);
       var hTot = padT + ih - ytop;
       if (hTot < 0.8) hTot = 0.8;
       p.push('<rect x="' + x0.toFixed(2) + '" y="' + ytop.toFixed(1) + '" width="' + rw + '" height="' + hTot.toFixed(1) + '" fill="' + tfill + '" rx="0.6"' + curCls + '/>');
@@ -1585,18 +1587,36 @@ function chartSelectPoint(svgId, pt){
   tip.style.display = 'block';
   var r = svg.getBoundingClientRect();
   var vb = (svg.getAttribute('viewBox') || '').split(/\s+/);
-  var vw = parseFloat(vb[2]) || r.width;
-  var sc = r.width / (vw || 1);
+  var vw = parseFloat(vb[2]) || r.width, vh = parseFloat(vb[3]) || r.height;
+  var sc = r.width / (vw || 1), scy = r.height / (vh || 1);
   var cx = r.left + ((hb.x0 + hb.x1) / 2) * sc;
   var tw = tip.offsetWidth, th = tip.offsetHeight;
-  var x = cx - tw / 2;
-  if (x < 6) x = 6;
-  if (x + tw > window.innerWidth - 6) x = window.innerWidth - 6 - tw;
-  var y = r.top + 10;
-  if (y + th > window.innerHeight - 6) y = window.innerHeight - 6 - th;
-  if (y < 6) y = 6;
-  tip.style.left = x + 'px';
-  tip.style.top = y + 'px';
+  var M = 6, px = cx - tw / 2, py = r.top + 10;
+  // 详情卡片不能盖住被选中的柱子：依次试「柱顶上方 → 柱底下方 → 柱子右侧 → 柱子左侧」，
+  // 每个候选先夹回视口，夹完还压着柱子就换下一个；四个都不行才退回默认位置（贴图顶）。
+  if (hb.yT != null){
+    var bx0 = r.left + hb.x0 * sc, bx1 = r.left + hb.x1 * sc;
+    var byT = r.top + hb.yT * scy, byB = r.top + hb.yB * scy;
+    var cw = window.innerWidth, chh = window.innerHeight;
+    var cyAt = Math.max(M, Math.min((byT + byB) / 2 - th / 2, chh - M - th));
+    var cand = [[cx - tw / 2, byT - th - M], [cx - tw / 2, byB + M], [bx1 + M + 2, cyAt], [bx0 - M - 2 - tw, cyAt]];
+    for (var ci = 0; ci < cand.length; ci++){
+      var qx = cand[ci][0], qy = cand[ci][1];
+      if (qx < M) qx = M;
+      if (qx + tw > cw - M) qx = cw - M - tw;
+      if (qy < M) qy = M;
+      if (qy + th > chh - M) qy = chh - M - th;
+      if (qx < bx1 + 2 && qx + tw > bx0 - 2 && qy < byB && qy + th > byT) continue;   // 仍压着柱子 → 换下一个位置
+      px = qx; py = qy; break;
+    }
+  } else {
+    if (px < M) px = M;
+    if (px + tw > window.innerWidth - M) px = window.innerWidth - M - tw;
+    if (py < M) py = M;
+    if (py + th > window.innerHeight - M) py = window.innerHeight - M - th;
+  }
+  tip.style.left = px + 'px';
+  tip.style.top = py + 'px';
 }
 function chartBindTap(svgId){
   var svg = document.getElementById(svgId); if (!svg) return;
