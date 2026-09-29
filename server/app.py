@@ -351,6 +351,63 @@ def _save_ap_ov(ov):
     os.replace(tmp, AP_OV_PATH)
 
 
+MERGE_PATH = os.path.join(ROOT, 'data', 'gw-merge.json')
+
+
+def _load_merge():
+    try:
+        with open(MERGE_PATH, encoding='utf-8') as f:
+            j = json.load(f)
+        return {str(k): str(v) for k, v in j.items() if k and v and k != v}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _save_merge(m):
+    os.makedirs(os.path.dirname(MERGE_PATH), exist_ok=True)
+    tmp = MERGE_PATH + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(m, f, ensure_ascii=False)
+    try:
+        os.chmod(tmp, 0o600)
+    except Exception:  # noqa: BLE001
+        pass
+    os.replace(tmp, MERGE_PATH)
+
+
+def _merge_keys(m, key):
+    """key 以及挂在它名下的所有成员（含传递链，防 A→B、B→C）。"""
+    out = [key]
+    grew = True
+    while grew:
+        grew = False
+        for mem, canon in m.items():
+            if canon in out and mem not in out:
+                out.append(mem)
+                grew = True
+    return out
+
+
+def _merge_rows(m, key, frm, to):
+    """key+成员的采样按 ts 合并：同一时刻多行优先在线那条（正常换 IP 不重叠，兜底）。"""
+    rows = []
+    for kk in _merge_keys(m, key):
+        try:
+            rows.extend(store.gw_series(kk, frm, to))
+        except Exception:  # noqa: BLE001
+            pass
+    rows.sort(key=lambda r: int(r['ts']))
+    out = []
+    for r in rows:
+        t = int(r['ts'])
+        if out and int(out[-1]['ts']) == t:
+            if r['present'] and not out[-1]['present']:
+                out[-1] = r
+            continue
+        out.append(r)
+    return out
+
+
 OFF_MAX_MIN = 1440          # 「暂停 N 分钟」上限（24 小时）
 
 
@@ -752,6 +809,16 @@ def api_gw_devices():
         devs = store.gw_latest(now - 900)
     except Exception as e:  # noqa: BLE001
         return jsonify(ok=False, error='读取采样失败：%s' % str(e)[:120]), 500
+    m = _load_merge()
+    if m:
+        by = {}
+        for d in devs:
+            kk = m.get(d['key'], d['key'])
+            d['key'] = kk
+            o = by.get(kk)
+            if o is None or d['ts'] > o['ts']:
+                by[kk] = d
+        devs = sorted(by.values(), key=lambda d: -d['ts'])
     try:
         links = store.gw_last_link()
     except Exception:  # noqa: BLE001
@@ -863,7 +930,84 @@ def api_gw_keys():
     days = int(request.args.get('days', 7))
     now = int(time.time())
     keys = store.gw_keys(now - days * 86400)
+    m = _load_merge()
+    if m:
+        by = {}
+        for k in keys:
+            kk = m.get(k['key'], k['key'])
+            o = by.get(kk)
+            if o is None:
+                k2 = dict(k)
+                k2['key'] = kk
+                by[kk] = k2
+            else:
+                o['last_ts'] = max(o.get('last_ts', 0), k.get('last_ts', 0))
+                if not o.get('name') and k.get('name'):
+                    o['name'] = k['name']
+        keys = sorted(by.values(), key=lambda x: -x.get('last_ts', 0))
     return jsonify(ok=True, now=now, keys=keys)
+
+
+@app.route('/api/gw/merge', methods=['OPTIONS', 'GET'])
+def api_gw_merge():
+    """同名设备分组 + 合并状态（设置页「同名设备合并」用）。"""
+    if request.method == 'OPTIONS':
+        return _opt('GET, OPTIONS')
+    if _auth_kind() is None:
+        return _deny()
+    now = int(time.time())
+    keys = store.gw_keys(now - 30 * 86400)
+    m = _load_merge()
+    groups = {}
+    for k in keys:
+        nm = (k.get('name') or '').strip()
+        if nm:
+            groups.setdefault(nm, []).append(k)
+    out = []
+    for nm, ks in groups.items():
+        if len(ks) < 2:
+            continue
+        ks = sorted(ks, key=lambda x: -x.get('last_ts', 0))
+        gkeys = [k['key'] for k in ks]
+        canon = None
+        for kk in gkeys:
+            if any(m.get(x) == kk for x in gkeys):
+                canon = kk
+                break
+        items = [{'key': k['key'], 'ip': k.get('ip') or k['key'],
+                  'last_ts': int(k.get('last_ts') or 0),
+                  'active': int(k.get('last_ts') or 0) >= now - 1800} for k in ks]
+        out.append({'name': nm, 'items': items,
+                    'merged': any(m.get(x) in gkeys for x in gkeys),
+                    'canonical': canon, 'overlap': sum(1 for i in items if i['active']) > 1})
+    return jsonify(ok=True, groups=out, map=m)
+
+
+@app.route('/api/gw/merge/set', methods=['OPTIONS', 'POST'])
+def api_gw_merge_set():
+    """合并/拆分一组设备（keys 按 last_ts 倒序传入，第一台为合并主体）。"""
+    if request.method == 'OPTIONS':
+        return _opt('POST, OPTIONS')
+    if _auth_kind() is None:
+        return _deny()
+    data = request.get_json(force=True, silent=True) or {}
+    keys = [str(k)[:64] for k in (data.get('keys') or []) if k]
+    keys = [k for k in dict.fromkeys(keys)]
+    if len(keys) < 2:
+        return jsonify(ok=False, error='至少要两台设备'), 400
+    m = _load_merge()
+    if data.get('on'):
+        for k in keys:
+            m.pop(k, None)
+        for k in keys[1:]:
+            m[k] = keys[0]
+    else:
+        for k in keys:
+            m.pop(k, None)
+        for x in [x for x, v in list(m.items()) if v in keys]:
+            del m[x]
+    _save_merge(m)
+    return jsonify(ok=True, keys=keys, on=bool(data.get('on')), map=m)
 
 
 @app.route('/api/gw/series', methods=['OPTIONS', 'GET'])
@@ -890,7 +1034,7 @@ def api_gw_series():
     has = [0] * n
     name = ''
     ip = ''
-    for r in store.gw_series(key, frm, end):
+    for r in _merge_rows(_load_merge(), key, frm, end):
         m = (int(r['ts']) - frm) // 60
         if m < 0 or m >= n:
             continue
@@ -906,8 +1050,9 @@ def api_gw_series():
             speed[i] = speed[i] / cnt[i]
             sup[i] = sup[i] / cnt[i]
             sdn[i] = sdn[i] / cnt[i]
+    mkeys = _merge_keys(_load_merge(), key)
     for k in store.gw_keys(frm):
-        if k['key'] == key:
+        if k['key'] in mkeys:
             name = k.get('name') or ''
             ip = k.get('ip') or ''
     return jsonify(ok=True, key=key, name=name, ip=ip, frm=frm, now=now, end=end, minutes=n,
@@ -935,7 +1080,7 @@ def api_gw_live():
     secs = max(60, min(secs, 3600))
     now = int(time.time())
     try:
-        rows = store.gw_series(key, now - secs, now + 1)
+        rows = _merge_rows(_load_merge(), key, now - secs, now + 1)
     except Exception as e:  # noqa: BLE001
         return jsonify(ok=False, error='读取采样失败：%s' % str(e)[:120]), 500
     name = ''

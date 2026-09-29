@@ -398,6 +398,9 @@
     </div>
     <div id="gwOut" class="sub mt-2"></div>
     </div>
+    <div class="sec">同名设备合并</div>
+    <div class="sub ml-0 mt-1">同一台设备换了 IP（DHCP）会变成两条记录、历史流量被拆开；合并后分析页按一台看。两台同名设备<b>同时在线</b>的别合并（那是真的两台）。</div>
+    <div id="mgBox" class="mt-2"><div class="sub">加载中…</div></div>
     <div class="sec">访问与安全</div>
     <div class="sub ml-0 mt-1">采集器密钥只给家里的微服用（装采集器时填）。别外传，也别贴到聊天里。</div>
     <div class="row mt-2">
@@ -887,6 +890,44 @@ function gwApply(cfg){
 function gwBoot(){
   // app 不再是采集端：监控页数据一律读服务器（微服采集器上报的那份），所以常驻刷新
   gwShow(); gwTick(); if (!GW.timer) GW.timer = setInterval(gwTick, 5000);
+  mgLoad();
+}
+/* 同名设备合并：同一台设备换 IP 后历史被拆开，这里把成员键并到主体键（分析/监控全口径生效） */
+function mgLoad(){
+  apiFetch(API + '/gw/merge', {})
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      var b = document.getElementById('mgBox');
+      if (!b) return;
+      if (!j || !j.ok){ b.innerHTML = '<div class="sub">读取失败</div>'; return; }
+      window.__mgGroups = j.groups || [];
+      if (!window.__mgGroups.length){ b.innerHTML = '<div class="sub">没有发现同名设备</div>'; return; }
+      b.innerHTML = window.__mgGroups.map(function(g, i){
+        var rows = g.items.map(function(it){
+          return '<div class="sub" style="margin:2px 0 0 10px">· ' + esc(it.ip || it.key) + ' · '
+            + (it.active ? '<span class="c-chill">在线中</span>' : '最后在线 ' + new Date(it.last_ts * 1000).toLocaleString()) + '</div>';
+        }).join('');
+        var warn = g.overlap ? '<div class="sub" style="color:#c2410c">⚠ 两台同时在线 —— 可能真是两台设备，慎合并</div>' : '';
+        var btn = g.merged
+          ? '<button type="button" class="btn ghost" onclick="mgSet(' + i + ',false)">拆分</button>'
+          : '<button type="button" class="btn" onclick="mgSet(' + i + ',true)">合并</button>';
+        return '<div class="mt-2" style="border:1px solid var(--line);border-radius:10px;padding:8px">'
+          + '<b>' + esc(g.name) + '</b> ' + btn
+          + (g.merged ? '<span class="sub"> 已合并 → ' + esc(g.canonical || '') + '</span>' : '')
+          + rows + warn + '</div>';
+      }).join('');
+    })
+    .catch(function(){ var b = document.getElementById('mgBox'); if (b) b.innerHTML = '<div class="sub">读取失败</div>'; });
+}
+function mgSet(i, on){
+  var g = (window.__mgGroups || [])[i];
+  if (!g) return;
+  var keys = g.items.map(function(it){ return it.key; });   // 已按 last_ts 倒序，第一台为主体
+  apiFetch(API + '/gw/merge/set', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keys: keys, on: on }) })
+    .then(function(r){ return r.json(); })
+    .then(function(j){ if (j && j.ok) mgLoad(); else alert((j && j.error) || '保存失败'); })
+    .catch(function(){ alert('网络失败'); });
 }
 function gwLoad(){
   // 先用本地缓存即时生效，再向服务器拉取统一配置覆盖
