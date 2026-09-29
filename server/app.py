@@ -327,6 +327,30 @@ def _save_link_ov(ov):
     os.replace(tmp, LINK_OV_PATH)
 
 
+AP_OV_PATH = os.path.join(ROOT, 'data', 'gw-ap-assign.json')
+
+
+def _load_ap_ov():
+    try:
+        with open(AP_OV_PATH, encoding='utf-8') as f:
+            j = json.load(f)
+        return j if isinstance(j, dict) else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _save_ap_ov(ov):
+    os.makedirs(os.path.dirname(AP_OV_PATH), exist_ok=True)
+    tmp = AP_OV_PATH + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(ov, f, ensure_ascii=False)
+    try:
+        os.chmod(tmp, 0o600)
+    except Exception:  # noqa: BLE001
+        pass
+    os.replace(tmp, AP_OV_PATH)
+
+
 OFF_MAX_MIN = 1440          # 「暂停 N 分钟」上限（24 小时）
 
 
@@ -742,6 +766,11 @@ def api_gw_devices():
         if d.get('key') in ov:
             d['link'] = ov[d['key']]    # 手动指定的最优先
             d['link_fixed'] = 1
+    aov = _load_ap_ov()
+    for d in devs:
+        if d.get('key') in aov:
+            d['ap'] = aov[d['key']]     # 手动指定挂在哪台 AP 下（拓扑分层用）
+            d['ap_fixed'] = 1
     wired = [d for d in devs if d.get('link') == 'wired']
     wireless = [d for d in devs if d.get('link') == 'wifi']
     age = (now - max([d['ts'] for d in devs])) if devs else -1
@@ -774,6 +803,27 @@ def api_gw_link():
         ov.pop(key, None)
     _save_link_ov(ov)
     return jsonify(ok=True, key=key, link=link)
+
+
+@app.route('/api/gw/ap', methods=['OPTIONS', 'POST'])
+def api_gw_ap():
+    """手动指定某台设备挂在哪台 AP 下（ap 为空 = 未指定）。"""
+    if request.method == 'OPTIONS':
+        return _opt('POST, OPTIONS')
+    if _auth_kind() is None:
+        return _deny()
+    data = request.get_json(force=True, silent=True) or {}
+    key = str(data.get('key') or '').strip()[:64]
+    ap = str(data.get('ap') or '').strip()[:64]
+    if not key:
+        return jsonify(ok=False, error='缺少设备标识'), 400
+    ov = _load_ap_ov()
+    if ap:
+        ov[key] = ap
+    else:
+        ov.pop(key, None)
+    _save_ap_ov(ov)
+    return jsonify(ok=True, key=key, ap=ap)
 
 
 @app.route('/api/gw/cred', methods=['OPTIONS', 'GET'])

@@ -1073,20 +1073,21 @@ function gwSortBy(k){
   gwPaint();
 }
 /* ---- 监控页：设备网络拓扑（替代原四个统计块） ---- */
-function topoNode(x, y, d, wired, ap){
+function topoNode(x, y, d, wired, apIdx){
   var m = devMeta(d);
   var ic = m.kd ? m.kd.i : (wired ? '🖥' : '📱');
   var on = SEL_IP && selOf(d) === SEL_IP;
-  var fill = ap ? '#fffbeb' : (wired ? '#f8fafc' : '#f0fdf4');
-  var st = on ? '#2563eb' : (ap ? '#f59e0b' : (wired ? '#cbd5e1' : '#86efac'));
+  var pc = (apIdx != null && apIdx >= 0) ? TOPO_AP_CLR[apIdx % TOPO_AP_CLR.length] : null;
+  var fill = pc ? pc[1] : (wired ? '#f8fafc' : '#f0fdf4');
+  var st = on ? '#2563eb' : (pc ? pc[0] : (wired ? '#cbd5e1' : '#86efac'));
   var s = '<rect x="' + x + '" y="' + y + '" width="160" height="32" rx="8" fill="' + fill
-        + '" stroke="' + st + '" stroke-width="' + (on ? 2 : (ap ? 1.6 : 1)) + '"/>';
+        + '" stroke="' + st + '" stroke-width="' + (on ? 2 : (pc ? 1.6 : 1)) + '"/>';
   s += '<text x="' + (x + 9) + '" y="' + (y + 13) + '" font-size="10" fill="#0f172a">'
      + esc(ic + ' ' + cutName(d.name || d.ip, 8)) + '</text>';
   s += '<text x="' + (x + 151) + '" y="' + (y + 13) + '" text-anchor="end" font-size="9.5" fill="#0e7490">↓'
      + esc(fmtSpeed(d.down)) + '</text>';
   s += '<text x="' + (x + 9) + '" y="' + (y + 25) + '" font-size="9" fill="#69737f">'
-     + esc((ap ? 'AP·' : '') + cutName(d.ip, 15)) + '</text>';
+     + esc((pc ? 'AP·' : '') + cutName(d.ip, 15)) + '</text>';
   s += '<text x="' + (x + 151) + '" y="' + (y + 25) + '" text-anchor="end" font-size="9" fill="#c2410c">↑'
      + esc(fmtSpeed(d.up)) + '</text>';
   return s;
@@ -1097,6 +1098,9 @@ function topoNode(x, y, d, wired, ap){
 function isGwSelf(d){
   return !!(String(d.ip || '') && String(d.ip) === String(GW.ip || ''));
 }
+/* 拓扑里每台 AP 一个颜色（描边 + 浅底），子层带与之对应 */
+var TOPO_AP_CLR = [['#f59e0b', '#fffbeb'], ['#8b5cf6', '#f5f3ff'], ['#0ea5e9', '#f0f9ff'],
+                   ['#10b981', '#ecfdf5'], ['#ef4444', '#fef2f2'], ['#d946ef', '#fdf4ff']];
 /* AP/子路由识别：名字像路由器/光猫的当下挂 AP（网关自己按 IP 精确排除；交换机不算） */
 function isApNode(d){
   var n = String(d.name || '').toLowerCase();
@@ -1153,28 +1157,86 @@ function topoPaint(){
     s.push('<text x="' + colC[i] + '" y="68" text-anchor="middle" font-size="9.5" fill="' + (wired ? '#69737f' : '#0f766e')
       + '" stroke="#fff" stroke-width="3" paint-order="stroke">' + (wired ? '🔌 有线 ' + nrAll : '📶 无线 ' + wf.length) + '</text>');
     for (var j = 0; j < list.length; j++)
-      s.push(topoNode(colX[i], TOP + j * ROW, list[j], wired, wired && j >= wr.length));
+      s.push(topoNode(colX[i], TOP + j * ROW, list[j], wired, wired && j >= wr.length ? j - wr.length : null));
   }
   var H = TOP + rows * ROW;
   if (aps.length && wa.length){
-    /* AP 子层：AP 有线上行接网关，自身 WiFi 下挂的设备画在下面（每行两个）。
-       只有唯一一台 AP 时才指名+画连线；多台 AP 时主网关分不出设备具体在哪台下，
-       标「经 AP 接入」不指名、不画连线。 */
-    var bandY = H + 16;
+    /* AP 子层按归属分组：主网关分不出设备在哪台 AP 下，归属手动指定（点设备循环
+       切换，存服务器）。每台 AP 一个颜色，AP 盒子与它的子层同色。
+       只有一台 AP 时不用指定，全部归它并画连线（老行为）。 */
+    var bands = [], byAp = {}, un = [], i2, q;
     if (aps.length === 1){
-      var apY = TOP + (wrList.length - 1) * ROW;
-      s.push('<path d="M' + colC[1] + ' ' + (apY + 32) + ' V' + (bandY - 3) + '" stroke="#0d9488" stroke-width="1.3" fill="none" stroke-dasharray="3 3"/>');
+      bands.push({ ap: ap, ai: 0, list: wa.slice() });
+    } else {
+      for (i2 = 0; i2 < wa.length; i2++){
+        var kk = String(wa[i2].ap || ''), hit = null;
+        for (q = 0; q < aps.length; q++) if (String(aps[q].key) === kk) hit = aps[q];
+        if (hit) (byAp[kk] = byAp[kk] || []).push(wa[i2]); else un.push(wa[i2]);
+      }
+      for (i2 = 0; i2 < aps.length; i2++)
+        if ((byAp[String(aps[i2].key)] || []).length) bands.push({ ap: aps[i2], ai: i2, list: byAp[String(aps[i2].key)] });
+      if (un.length) bands.push({ ap: null, ai: -1, list: un });
     }
-    var bandLbl = (aps.length === 1 ? (esc(cutName(ap.name || ap.ip, 12)) + ' · 无线下挂 ') : '经 AP 接入 · 无线 ');
-    s.push('<text x="170" y="' + (bandY + 5) + '" text-anchor="middle" font-size="9.5" fill="#0f766e"'
-      + ' stroke="#fff" stroke-width="3" paint-order="stroke">📶 ' + bandLbl + wa.length + '</text>');
-    var arows = Math.ceil(wa.length / 2);
-    for (i = 0; i < wa.length; i++)
-      s.push(topoNode(colX[i % 2], bandY + 12 + Math.floor(i / 2) * ROW, wa[i], false));
-    H = bandY + 12 + arows * ROW + 4;
+    var y2 = H + 16;
+    for (var b2 = 0; b2 < bands.length; b2++){
+      var bd = bands[b2];
+      var clr = bd.ap ? TOPO_AP_CLR[bd.ai % TOPO_AP_CLR.length][0] : '#64748b';
+      if (bd.ap && aps.length === 1){
+        var apY2 = TOP + (wrList.length - 1) * ROW;
+        s.push('<path d="M' + colC[1] + ' ' + (apY2 + 32) + ' V' + (y2 - 3) + '" stroke="#0d9488" stroke-width="1.3" fill="none" stroke-dasharray="3 3"/>');
+      }
+      var bLbl = bd.ap ? (esc(cutName(bd.ap.name || bd.ap.ip, 12)) + ' · 无线下挂 ')
+                       : '未指定 AP · 无线 ';
+      s.push('<text x="170" y="' + (y2 + 5) + '" text-anchor="middle" font-size="9.5" fill="' + clr + '"'
+        + ' stroke="#fff" stroke-width="3" paint-order="stroke">📶 ' + bLbl + bd.list.length
+        + (bd.ap ? '' : '（点设备切换归属）') + '</text>');
+      var arws2 = Math.ceil(bd.list.length / 2);
+      for (i2 = 0; i2 < bd.list.length; i2++){
+        var nd2 = topoNode(colX[i2 % 2], y2 + 12 + Math.floor(i2 / 2) * ROW, bd.list[i2], false);
+        if (aps.length > 1)
+          nd2 = '<g style="cursor:pointer" onclick="topoAssignAp(\'' + escA(String(bd.list[i2].key || bd.list[i2].ip || '')) + '\')">' + nd2 + '</g>';
+        s.push(nd2);
+      }
+      y2 += 12 + arws2 * ROW + 12;
+    }
+    H = y2;
   }
   svg.setAttribute('viewBox', '0 0 340 ' + H);
   svg.innerHTML = s.join('');
+}
+/* 点拓扑里的设备框循环切换它挂在哪台 AP 下（未指定 → AP1 → AP2 → …，存服务器） */
+function topoAps(){
+  var out = [], ds = GW.last || [], i;
+  for (i = 0; i < ds.length; i++){
+    var d = ds[i];
+    if (isGwSelf(d)) continue;
+    if (gwLink(d) !== '无线' && isApNode(d)) out.push(d);
+  }
+  return out;
+}
+function topoApName(k){
+  var a = topoAps();
+  for (var i = 0; i < a.length; i++) if (String(a[i].key || a[i].ip) === String(k)) return cutName(a[i].name || a[i].ip, 12);
+  return String(k);
+}
+function topoHint(t){ var h = document.getElementById('topoHint'); if (h) h.textContent = t; }
+function topoAssignAp(key){
+  var ds = GW.last || [], d = null, i;
+  for (i = 0; i < ds.length; i++) if (String(ds[i].key || ds[i].ip) === String(key)) { d = ds[i]; break; }
+  if (!d || topoAps().length < 2) return;
+  var order = [''].concat(topoAps().map(function(a){ return String(a.key || a.ip); }));
+  var cur = String(d.ap || '');
+  var nx = order[(order.indexOf(cur) + 1) % order.length];
+  apiFetch(API + '/gw/ap', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key: key, ap: nx }) })
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      if (!j || !j.ok){ topoHint('❌ ' + ((j && j.error) || '保存失败')); return; }
+      if (nx) d.ap = nx; else delete d.ap;
+      topoPaint();
+      topoHint(nx ? ('已把 ' + cutName(d.name || d.ip, 8) + ' 归到 ' + topoApName(nx) + ' 下') : '已改为未指定');
+    })
+    .catch(function(){ topoHint('保存失败（网络）'); });
 }
 function gwPaint(){
   var b = document.getElementById('gwBody'); if (!b) return;
