@@ -288,6 +288,45 @@ def _save_gwcfg(cfg):
     os.replace(tmp, CFG_PATH)
 
 
+LINK_OV_PATH = os.path.join(ROOT, 'data', 'gw-link-overrides.json')
+
+# 这些品类的设备只可能是无线接入；网关把它们记成「有线」，多半是挂在
+# 子路由/AP（如 华为路由BE7）的 WiFi 下 —— 默认按无线显示，还可以再手动改。
+_WIFI_ONLY_KEYS = (
+    '音箱', '音响', '智能屏', '插座', '摄像头', '摄像机', '门铃',
+    '扫地', '拖扫', '扫拖', '吸尘', '机器人', '冰箱', '冷柜', '冰柜',
+    '洗衣机', '干衣', '空调', '电视', '投影', '净化', '加湿', '风扇',
+    '窗帘', '灯', '开关', '传感器', '门锁', '热水', '净水', '马桶',
+    '体重秤', '手环', '手表', '手机', 'phone',
+)
+
+
+def _wifi_only_default(name):
+    n = str(name or '').lower()
+    return any(k in n for k in _WIFI_ONLY_KEYS)
+
+
+def _load_link_ov():
+    try:
+        with open(LINK_OV_PATH, encoding='utf-8') as f:
+            j = json.load(f)
+        return j if isinstance(j, dict) else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _save_link_ov(ov):
+    os.makedirs(os.path.dirname(LINK_OV_PATH), exist_ok=True)
+    tmp = LINK_OV_PATH + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(ov, f, ensure_ascii=False)
+    try:
+        os.chmod(tmp, 0o600)
+    except Exception:  # noqa: BLE001
+        pass
+    os.replace(tmp, LINK_OV_PATH)
+
+
 OFF_MAX_MIN = 1440          # 「暂停 N 分钟」上限（24 小时）
 
 
@@ -693,9 +732,15 @@ def api_gw_devices():
         links = store.gw_last_link()
     except Exception:  # noqa: BLE001
         links = {}
+    ov = _load_link_ov()
     for d in devs:
         if not d.get('link'):
             d['link'] = links.get(d['key'], '')
+        if d.get('link') != 'wifi' and _wifi_only_default(d.get('name')):
+            d['link'] = 'wifi'          # 只可能无线的品类：挂在子路由/AP 下也按无线
+        if d.get('key') in ov:
+            d['link'] = ov[d['key']]    # 手动指定的最优先
+            d['link_fixed'] = 1
     wired = [d for d in devs if d.get('link') == 'wired']
     wireless = [d for d in devs if d.get('link') == 'wifi']
     age = (now - max([d['ts'] for d in devs])) if devs else -1
@@ -705,6 +750,29 @@ def api_gw_devices():
         'wired': len(wired), 'wireless': len(wireless),
     }
     return jsonify(ok=True, ts=now, age=age, src='collector', devices=devs, totals=totals)
+
+
+@app.route('/api/gw/link', methods=['OPTIONS', 'POST'])
+def api_gw_link():
+    """手动指定某台设备的有线/无线；link 为空 = 恢复自动判定。"""
+    if request.method == 'OPTIONS':
+        return _opt('POST, OPTIONS')
+    if _auth_kind() is None:
+        return _deny()
+    data = request.get_json(force=True, silent=True) or {}
+    key = str(data.get('key') or '').strip()[:64]
+    link = str(data.get('link') or '')
+    if not key:
+        return jsonify(ok=False, error='缺少设备标识'), 400
+    if link not in ('', 'wifi', 'wired'):
+        return jsonify(ok=False, error='link 只能是 wifi / wired / 空字符串'), 400
+    ov = _load_link_ov()
+    if link:
+        ov[key] = link
+    else:
+        ov.pop(key, None)
+    _save_link_ov(ov)
+    return jsonify(ok=True, key=key, link=link)
 
 
 @app.route('/api/gw/cred', methods=['OPTIONS', 'GET'])
@@ -833,6 +901,9 @@ def api_gw_live():
         link = store.gw_last_link().get(key, '')
     except Exception:  # noqa: BLE001
         link = ''
+    if link != 'wifi' and _wifi_only_default(name):
+        link = 'wifi'
+    link = _load_link_ov().get(key, link)
     samples = [[int(r['ts']), float(r['up'] or 0), float(r['down'] or 0),
                 1 if r['present'] else 0] for r in rows]
     on = [s for s in samples if s[3]]

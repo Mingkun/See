@@ -259,6 +259,10 @@
   body.chartfs { overflow:hidden; }
   body.chartfs .tabbar { display:none; }
   body.chartfs .chart-svg.chart-fs { position:fixed; left:0; top:0; width:100vw; height:100vh; z-index:950; background:#fff; border:none; border-radius:0; touch-action:none; -webkit-user-select:none; user-select:none; }
+
+  /* 监控页：设备的 无线/有线 标签可点按手动改（挂子路由/AP 下的默认判无线） */
+  .lkbtn { cursor:pointer; -webkit-tap-highlight-color:transparent; border-bottom:1px dashed #b6c2d2; padding:0 1px; }
+  .lkbtn.fixed { color:var(--brand); font-weight:600; border-bottom-style:solid; }
 </style>
 </head>
 <body>
@@ -1022,6 +1026,37 @@ function devMeta(d){
   return { br: br, kd: kd };
 }
 function gwLink(d){ if (d.link === 'wifi') return '无线'; if (d.link === 'wired') return '有线'; return '—'; }
+/* 点按 无线/有线 标签循环切换：自动 → 无线 → 有线 → 自动；手动值存服务器（/api/gw/link） */
+function gwCycleLink(el){
+  var k = el && el.getAttribute('data-k'); if (!k) return;
+  var d = null, i, ds = GW.last || [];
+  for (i = 0; i < ds.length; i++) if (String(ds[i].key || ds[i].ip) === k) { d = ds[i]; break; }
+  if (!d) return;
+  var cur = d.link_fixed ? d.link : '';
+  var nxt = cur === '' ? 'wifi' : (cur === 'wifi' ? 'wired' : '');
+  apiFetch(API + '/gw/link', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key: k, link: nxt }) })
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      if (!j || !j.ok) { gwLinkNote('❌ ' + ((j && j.error) || '保存失败')); return; }
+      if (nxt) { d.link = nxt; d.link_fixed = 1; } else { delete d.link_fixed; }
+      gwPaint(); topoPaint(); gwSumPaint();
+      gwLinkNote(nxt === 'wifi' ? '已手动设为 无线' : (nxt === 'wired' ? '已手动设为 有线' : '已恢复自动判定'));
+    })
+    .catch(function(){ gwLinkNote('保存失败（网络）'); });
+}
+function gwLinkNote(t){
+  var o = document.getElementById('gwOut');
+  if (o) o.textContent = t + ' · ' + new Date().toLocaleTimeString();
+}
+function gwSumPaint(){
+  var s = document.getElementById('gwSum'), i, dn = 0, up = 0, wf = 0, ds = GW.last || [];
+  for (i = 0; i < ds.length; i++){
+    dn += Number(ds[i].down) || 0; up += Number(ds[i].up) || 0;
+    if (gwLink(ds[i]) === '无线') wf++;
+  }
+  if (s) s.textContent = '↓' + fmtSpeed(dn) + ' ↑' + fmtSpeed(up) + ' · 有线' + (ds.length - wf) + '/无线' + wf;
+}
 function gwBrandLbl(d){ var m = devMeta(d); return m.br ? m.br.n : (m.kd ? m.kd.l : ''); }
 function gwSortVal(d, k){
   if (k === 'link') return gwLink(d) === '无线' ? 1 : 0;
@@ -1107,7 +1142,9 @@ function gwPaint(){
   else {
     b.innerHTML = ds.map(function(d){
       return '<tr' + (SEL_IP && selOf(d) === SEL_IP ? ' class="pinned"' : '') + '>'
-        + '<td class="sub">' + gwLink(d) + '</td>'
+        + '<td class="sub"><span class="lkbtn' + (d.link_fixed ? ' fixed' : '')
+          + '" data-k="' + escA(String(d.key || d.ip || '')) + '" onclick="gwCycleLink(this)"'
+          + ' title="点按切换 无线/有线/自动">' + gwLink(d) + '</span></td>'
         + '<td><div class="name" title="' + escA(d.name || d.ip) + '">' + (isSelf(d) ? '<span class="me">' : '') + esc(cutName(d.name || d.ip, 12)) + (isSelf(d) ? '</span>' : '') + '</div><div class="sub">' + esc(d.ip) + '</div></td>'
         + '<td class="num dn">' + fmtSpeed(d.down) + '</td>'
         + '<td class="num up">' + fmtSpeed(d.up) + '</td>'
@@ -1144,7 +1181,7 @@ function gwTick(){
       a = document.getElementById('cDay');
       if (a) a.textContent = (j.age < 0) ? '—' : (j.age < 120 ? j.age + ' 秒前' : Math.round(j.age / 60) + ' 分钟前');
       var box = document.getElementById('gwOut');
-      if (box) box.textContent = '数据来自微服采集器 · 网关 ' + (GW.ip || '') + ' · ' + new Date().toLocaleTimeString();
+      if (box) box.textContent = '数据来自微服采集器 · 网关 ' + (GW.ip || '') + ' · ' + new Date().toLocaleTimeString() + ' · 点「无线/有线」可改';
     })
     .catch(function(){
       var e = document.getElementById('gwErr'); if (e) e.textContent = '连接失败（手机需在网关局域网内）';
