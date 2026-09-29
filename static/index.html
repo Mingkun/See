@@ -1091,6 +1091,13 @@ function topoNode(x, y, d, wired){
      + esc(fmtSpeed(d.up)) + '</text>';
   return s;
 }
+/* 网关自身：主网关会把自己也列进设备表（占个内部/历史 IP、0 流量，如 华为OptiXstar@.3）。
+   拓扑里不当普通设备画，并进根节点显示型号。 */
+function isGwSelf(d){
+  if (String(d.ip || '') && String(d.ip) === String(GW.ip || '')) return true;
+  var n = String(d.name || '').toLowerCase();
+  return n.indexOf('光猫') >= 0 || n.indexOf('optixstar') >= 0 || n.indexOf('optistar') >= 0;
+}
 /* AP/子路由识别：名字像路由器的当下挂 AP；网关自己、光猫、交换机不算 */
 function isApNode(d){
   var n = String(d.name || '').toLowerCase();
@@ -1112,10 +1119,11 @@ function topoPaint(){
     return;
   }
   if (hint) hint.textContent = '';
-  /* 分组：AP 节点 / 直连无线 / 经AP无线（网关口径=有线、显示=无线）/ 有线 */
-  var ap = null, wf = [], wa = [], wr = [], i;
+  /* 分组：网关自身 / AP 节点 / 直连无线 / 经AP无线（网关口径=有线、显示=无线）/ 有线 */
+  var ap = null, gwSelf = null, wf = [], wa = [], wr = [], i;
   for (i = 0; i < ds.length; i++){
     var d = ds[i];
+    if (!gwSelf && isGwSelf(d)){ gwSelf = d; continue; }
     if (gwLink(d) !== '无线'){
       if (!ap && isApNode(d)) ap = d; else wr.push(d);
       continue;
@@ -1132,8 +1140,9 @@ function topoPaint(){
   var lists = [wf, wrList], rows = Math.max(wf.length, wrList.length, 1);
   var s = [];
   s.push('<rect x="110" y="6" width="120" height="36" rx="10" fill="#eef4ff" stroke="#2563eb" stroke-width="1.2"/>');
-  s.push('<text x="170" y="21" text-anchor="middle" font-size="10" font-weight="600" fill="#0f172a">📡 网关</text>');
-  s.push('<text x="170" y="34" text-anchor="middle" font-size="9" fill="#69737f">' + esc((GW.ip || '') + ' · 在线 ' + ds.length) + '</text>');
+  var gwLbl = gwSelf ? ('📡 ' + String(gwSelf.name || '网关').split(/\s+/)[0].slice(0, 14)) : '📡 网关';
+  s.push('<text x="170" y="21" text-anchor="middle" font-size="10" font-weight="600" fill="#0f172a">' + esc(gwLbl) + '</text>');
+  s.push('<text x="170" y="34" text-anchor="middle" font-size="9" fill="#69737f">' + esc((GW.ip || '') + ' · 在线 ' + (ds.length - (gwSelf ? 1 : 0))) + '</text>');
   s.push('<path d="M170 42 V52" stroke="#cbd5e1" stroke-width="1.2" fill="none"/>');
   s.push('<path d="M' + colC[0] + ' 52 H' + colC[1] + '" stroke="#cbd5e1" stroke-width="1.2" fill="none"/>');
   for (i = 0; i < 2; i++){
