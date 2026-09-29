@@ -736,6 +736,7 @@ def api_gw_devices():
     for d in devs:
         if not d.get('link'):
             d['link'] = links.get(d['key'], '')
+        d['link_raw'] = d.get('link') or ''   # 网关原始口径：拓扑图判断「挂在 AP 下」用
         if d.get('link') != 'wifi' and _wifi_only_default(d.get('name')):
             d['link'] = 'wifi'          # 只可能无线的品类：挂在子路由/AP 下也按无线
         if d.get('key') in ov:
