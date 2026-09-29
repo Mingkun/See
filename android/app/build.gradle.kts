@@ -11,8 +11,8 @@ android {
         applicationId = "com.mingkun.see"
         minSdk = 26
         targetSdk = 34
-        versionCode = 124
-        versionName = "3.13"
+        versionCode = 125
+        versionName = "3.14"
     }
 
     buildTypes {

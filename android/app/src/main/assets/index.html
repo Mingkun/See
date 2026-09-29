@@ -1658,6 +1658,7 @@ function anRender(j){
     runs2.push({ a: a3, b: rr.b, len: rr.b - a3, peak: pk4, lt: rr.lt });
   }
   runs = runs2;
+  runs.reverse();   // 按时间倒序：最新的一段排最上面
   var sb = document.getElementById('anSleepBody');
   if (!runs.length) { sb.innerHTML = '<tr><td colspan="4" class="hint">今天还没出现 ≥10 分钟的轻量/空闲时段</td></tr>'; }
   else {
