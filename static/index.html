@@ -1550,10 +1550,15 @@ function chartTipEl(){ return document.getElementById('chart' + 'Tip'); }
 function chartTipSync(svg){
   var tip = chartTipEl(); if (!tip) return;
   if (tip.style.display !== 'block') return;
-  if (!svg || svg.__sel == null || !svg.__bars || !svg.__bars[svg.__sel]) { tip.style.display = 'none'; return; }
-  tip.innerHTML = svg.__bars[svg.__sel].tip;
+  // 小框只有一张、归当前选中的那张图：别的图重绘时不许动它。
+  // 否则实时负载图每 3 秒重绘一次（__sel 为空）→ 会把分析图选中的小框顺手收掉。
+  if (tip.dataset.owner && svg && tip.dataset.owner !== svg.id) return;
+  if (!svg || svg.__sel == null || !svg.__bars || !svg.__bars[svg.__sel]) { chartHideTip(); return; }
+  var hb = svg.__bars[svg.__sel];
+  tip.innerHTML = hb.tip;
+  chartPlaceTip(svg, hb, tip);          // 重绘后图尺寸可能变（转屏/改窗口/进度差异），位置重算
 }
-function chartHideTip(){ var t = chartTipEl(); if (t) t.style.display = 'none'; }
+function chartHideTip(){ var t = chartTipEl(); if (t) { t.style.display = 'none'; delete t.dataset.owner; } }
 function chartSvgPoint(svg, ev){
   var r = svg.getBoundingClientRect();
   var vb = (svg.getAttribute('viewBox') || '').split(/\s+/);
@@ -1585,6 +1590,10 @@ function chartSelectPoint(svgId, pt){
   var tip = chartTipEl(); if (!tip) return;
   tip.innerHTML = hb.tip;
   tip.style.display = 'block';
+  tip.dataset.owner = svg.id;
+  chartPlaceTip(svg, hb, tip);
+}
+function chartPlaceTip(svg, hb, tip){
   var r = svg.getBoundingClientRect();
   var vb = (svg.getAttribute('viewBox') || '').split(/\s+/);
   var vw = parseFloat(vb[2]) || r.width, vh = parseFloat(vb[3]) || r.height;
