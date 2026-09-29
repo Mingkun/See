@@ -1544,7 +1544,6 @@ function anLoad(){
     .then(function(j){ if (!j || !j.ok) { document.getElementById('anSub').textContent = '❌ ' + ((j && j.error) || '失败'); return; } anRender(j); anLiveLoad(); })
     .catch(function(){ document.getElementById('anSub').textContent = '服务器连接失败'; });
 }
-var AN_THR = 4096;        // 空闲阈值（平均速率，用于空闲时段统计）
 var AN_BUSY = 1048576;    // 「繁忙」阈值 = 合计（上行+下行）峰值 ≥ 1 M/s；柱色、虚线、分时用量状态共用这一个值
 function anDayLbl(sec){ var d = new Date(sec * 1000); return (d.getMonth() + 1) + '-' + d.getDate(); }
 function anHMin(sec){ var d = new Date(sec * 1000); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
@@ -1583,6 +1582,7 @@ function anRender(j){
   p.push('<line x1="' + padL + '" y1="' + (padT + ih) + '" x2="' + (padL + iw) + '" y2="' + (padT + ih) + '" stroke="#dfe5ee"/>');
   p.push('<text x="4" y="' + (padT + 8) + '" font-size="8" fill="#9aa4b2">' + fmtSpeed(maxV) + '</text>');
   var bw = iw / groups, bars = [];
+  var tiers = [], gpks = [];   // 每格档位/峰值，给「轻量+空闲」时段用（与分时用量同口径）
   var durMin = { busy: 0, chill: 0, idle: 0, none: 0 };   // 窗口内各状态累计时长（分钟），只累到当前所在的 5 分钟
   var nowSec = j.now || Math.floor(Date.now() / 1000);
   // 当前时段 = 覆盖 now 的那一格（与分时用量表的 .curhour 同一格），整柱缓慢闪动标识
@@ -1595,6 +1595,8 @@ function anRender(j){
     // 状态三档与「分时用量」一致：按峰值判 繁忙/轻量/空闲
     var isCur = (g === curG);
     var tier = !any ? 'none' : (!pres ? 'off' : (pk >= PKTH ? 'busy' : (pk > 0 ? 'chill' : 'idle')));
+    tiers.push(tier === 'off' ? 'idle' : tier);   // 分时用量把不在线显示为空闲，时段卡同样并入
+    gpks.push(pk);
     var stt = tier === 'none' ? '无数据' : (tier === 'off' ? '不在线' : (tier === 'busy' ? '繁忙' : (tier === 'chill' ? '轻量' : '空闲')));
     var tfill = tier === 'busy' ? '#2563eb' : (tier === 'chill' ? '#16a34a' : '#69737f');
     // 「不在线」在四档图例里并入「无数据」；未到时间的格子不计入任何档
@@ -1625,37 +1627,22 @@ function anRender(j){
   svg.__bars = bars;
   svg.innerHTML = p.join('');
   chartTipSync(svg);
+  // 「轻量 + 空闲」时段：与「分时用量」完全同一套口径 —— 5 分钟一格、按该格峰值
+  // 分档（空闲=整格零流量、轻量=有流量但峰值 <1M/s），连续 ≥10 分钟（2 格）才算。
+  // 老逻辑按「分钟均速 <4KB/s」切，跟峰值口径对不上，已废弃（AN_THR 一并删除）。
   var runs = [];
   var i2 = 0;
-  while (i2 < n){
-    var idle = hs[i2] ? (pr[i2] ? (sp[i2] < AN_THR) : true) : false;
-    if (!idle) { i2++; continue; }
-    var j2 = i2, peak = 0;
-    while (j2 < n){
-      var idle2 = hs[j2] ? (pr[j2] ? (sp[j2] < AN_THR) : true) : false;
-      if (!idle2) break;
-      if (sp[j2] > peak) peak = sp[j2];
+  while (i2 < tiers.length){
+    var tt = tiers[i2];
+    if (tt !== 'idle' && tt !== 'chill'){ i2++; continue; }
+    var j2 = i2, pk2 = 0;
+    while (j2 < tiers.length && tiers[j2] === tt){
+      if (gpks[j2] > pk2) pk2 = gpks[j2];
       j2++;
     }
-    if (j2 - i2 >= 10) runs.push({ a: i2, b: j2, len: j2 - i2, peak: peak, lt: 0 });
+    if ((j2 - i2) * G >= 10) runs.push({ a: i2 * G, b: j2 * G, len: (j2 - i2) * G, peak: pk2, lt: tt === 'chill' ? 1 : 0 });
     i2 = j2;
   }
-  // 连续「轻量」时段：分钟均速在 4KB/s–1MB/s 之间的连续段（同样 ≥10 分钟才算）
-  i2 = 0;
-  while (i2 < n){
-    var lit = hs[i2] && pr[i2] && sp[i2] >= AN_THR && sp[i2] < AN_BUSY;
-    if (!lit) { i2++; continue; }
-    var j3 = i2, pk3 = 0;
-    while (j3 < n){
-      var lit2 = hs[j3] && pr[j3] && sp[j3] >= AN_THR && sp[j3] < AN_BUSY;
-      if (!lit2) break;
-      if (sp[j3] > pk3) pk3 = sp[j3];
-      j3++;
-    }
-    if (j3 - i2 >= 10) runs.push({ a: i2, b: j3, len: j3 - i2, peak: pk3, lt: 1 });
-    i2 = j3;
-  }
-  runs.sort(function(x, y){ return x.a - y.a; });
   var sb = document.getElementById('anSleepBody');
   if (!runs.length) { sb.innerHTML = '<tr><td colspan="4" class="hint">没找到 ≥10 分钟的轻量/空闲时段</td></tr>'; }
   else {
