@@ -118,7 +118,7 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
             online = scanner.devices.values.count { it.online }
         }
         val o = JSONObject()
-        o.put("ok", true); o.put("mode", "observer"); o.put("iface", "wifi"); o.put("ver", "3.09"); o.put("vercode", 120)
+        o.put("ok", true); o.put("mode", "observer"); o.put("iface", "wifi"); o.put("ver", "3.10"); o.put("vercode", 121)
         o.put("subnet", scanner.subnet); o.put("ip", phoneIp)
         o.put("uptime", System.currentTimeMillis() / 1000 - scanner.startTs)
         o.put("online", online); o.put("devices", total)
