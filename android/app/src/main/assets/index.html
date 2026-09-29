@@ -309,7 +309,7 @@
       <button type="button" onclick="anLoad()" class="btn">刷新</button>
     </div>
     <div class="pbody mt-1"><svg id="anChart" class="chart-svg"></svg></div>
-    <div  class="sub legend"><span id="anAxisTxt">横轴 0–24 时</span> · 纵轴为下行+上行速率（对数显示），柱色按峰值分档；<span class="c-busy">▬</span> 繁忙 · <span class="c-chill">▬</span> 放松 · <span class="c-idle">▬</span> 空闲 · <span class="c-muted">▬</span> 无数据</div>
+    <div  class="sub legend"><span id="anAxisTxt">横轴 0–24 时</span> · 纵轴为下行+上行速率（对数显示），柱色按峰值分档；<span class="c-brand">▬</span> 繁忙 · <span class="c-chill">▬</span> 放松 · <span class="c-idle">▬</span> 空闲 · <span class="c-muted">▬</span> 无数据</div>
     <div id="anLegend"  class="sub legend"></div>
   </div>
   <div class="panel" id="anLivePanel">
@@ -1430,7 +1430,7 @@ function anRender(j){
     var isCur = (g === curG);
     var tier = !any ? 'none' : (!pres ? 'off' : (pk >= AN_BUSY ? 'busy' : (pk > 0 ? 'chill' : 'idle')));
     var stt = tier === 'none' ? '无数据' : (tier === 'off' ? '不在线' : (tier === 'busy' ? '繁忙' : (tier === 'chill' ? '放松' : '空闲')));
-    var tfill = tier === 'busy' ? '#ea580c' : (tier === 'chill' ? '#16a34a' : '#69737f');
+    var tfill = tier === 'busy' ? '#2563eb' : (tier === 'chill' ? '#16a34a' : '#69737f');
     bars.push({ x0: x0, x1: x0 + bw, tip: (isCur ? '🔴 当前时段<br>' : '') + '<b>' + anHMin(t0) + '–' + anHMin(t1) + '</b><br>均 ' + fmtSpeed(av) + ' · 峰 ' + fmtSpeed(pk) + '<br>' + stt });
     var rw = Math.max(bw - 0.4, 0.6).toFixed(2), fw = Math.max(bw, 0.6).toFixed(2);
     var curStroke = isCur ? ' stroke="#dc2626" stroke-width="1.4"' : '';
