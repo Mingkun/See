@@ -1463,9 +1463,8 @@ function anRender(j){
   // 且取在总量程上，所以线代表的就是「合计峰值」本身，不只是标签这么写。
   // 只在量程装得下时画：yv() 对超过量程的值会贴顶 clamp，全窗口都不到阈值时硬画会停住骗人。
   if (maxV >= PKTH){
-    var yRef = yv(PKTH), labY = (yRef - padT < 10) ? yRef + 9 : yRef - 3;
+    var yRef = yv(PKTH);
     p.push('<line x1="' + padL + '" y1="' + yRef.toFixed(1) + '" x2="' + (padL + iw) + '" y2="' + yRef.toFixed(1) + '" stroke="#e8c94f" stroke-width="1.2" stroke-dasharray="4 3" pointer-events="none"/>');
-    p.push('<text x="' + (padL + iw - 1).toFixed(1) + '" y="' + labY.toFixed(1) + '" font-size="8" fill="#c2a52f" text-anchor="end" pointer-events="none">合计峰值 1 M/s</text>');
   }
   if (svg.__sel != null && bars[svg.__sel]) p.push(chartMarkRect(bars[svg.__sel], padT, ih));
   svg.__bars = bars;
