@@ -104,64 +104,22 @@ class Gateway(object):
                 return -1, '请求异常：%s' % e
         return st, txt
 
-    def token(self):
-        """devInfo 需要页面里的 token（与 app 同一套做法）。"""
-        if getattr(self, 'token_v', ''):
-            return self.token_v
-        try:
-            st, txt = self.http.get('http://%s/cgi-bin/luci/admin/device/pc' % self.ip,
-                                    {'User-Agent': UA})
-            m = re.search(r"token\s*:\s*'([0-9a-zA-Z]+)'", txt or '')
-            if m:
-                self.token_v = m.group(1)
-        except Exception:  # noqa: BLE001
-            pass
-        return getattr(self, 'token_v', '')
-
-    def dev_info(self, typ):
-        """网关权威的链路类型：POST /admin/device/devInfo type=0 有线 / type=1 无线。
-
-        返回 {ip: 'wired'|'wifi'}；拿不到就返回空表（页面会显示「—」，不影响采样）。
-        注：allInfo 的 pc*/wifi* 只是槽位索引，会漂移，不能当链路类型。
-        """
-        out = {}
-        tok = self.token()
-        body = urllib.parse.urlencode({'type': str(typ)}).encode()
-        head = {'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': UA}
-        if tok:
-            body = urllib.parse.urlencode({'token': tok, 'type': str(typ)}).encode()
-        try:
-            st, txt = self.http.post('http://%s/cgi-bin/luci/admin/device/devInfo' % self.ip, body, head)
-        except Exception:  # noqa: BLE001
-            return out
-        if not (txt or '').lstrip().startswith('{'):
-            self.login()
-            self.token_v = ''
-            body = urllib.parse.urlencode({'type': str(typ)}).encode()
-            try:
-                st, txt = self.http.post('http://%s/cgi-bin/luci/admin/device/devInfo' % self.ip, body, head)
-            except Exception:  # noqa: BLE001
-                return out
-        if not (txt or '').lstrip().startswith('{'):
-            return out
-        try:
-            j = json.loads(txt)
-        except Exception:  # noqa: BLE001
-            return out
-        want = 'wired' if str(typ) == '0' else 'wifi'
-        for k, d in j.items():
-            if not (isinstance(d, dict) and k.startswith('dev')):
-                continue
-            ip = str(d.get('ip') or '')
-            if ip and ip != '--':
-                out[ip] = want
-        return out
+    # 链路类型不再走 devInfo（要 token、按 IP 对表、60s 一刷、一半失败时整表被
+    # 替换——历史上链路来回翻/大量空值就是这么来的）。改直接用 allInfo 记录所在
+    # 的列表：pc* = 有线、wifi* = 无线（与网关首页 wcount/wlcount 同一份口径，
+    # 实测计数完全一致），见 parse_allinfo()。
 
 
 def parse_allinfo(txt):
-    """allInfo JSON -> 设备列表。devkey 用 IP（网关 pc1/wifi1 是槽位会漂移）。"""
+    """allInfo JSON -> 设备列表。devkey 用 IP（网关 pc1/wifi1 是槽位会漂移）。
+
+    链路类型直接取记录所在的列表：pc* = 有线、wifi* = 无线，每轮采样自带、
+    逐条对应，不用再按 IP 去对 devInfo 的表。
+    手机（type=phone）即使落在 pc* 里也按 无线 算：那是接在 BE7 这类
+    子路由/AP WiFi 下的手机，主网关只看见流量从它的网口进来，分不出无线。
+    """
     j = json.loads(txt)
-    out = []
+    seen = {}
     for k, d in j.items():
         if not (k.startswith('pc') or k.startswith('wifi')):
             continue
@@ -172,9 +130,17 @@ def parse_allinfo(txt):
         if ip == '--':
             ip = ''
         dk = ip if ip else k
-        out.append({'key': dk, 'name': name, 'ip': ip,
-                    'up': float(d.get('upSpeed') or 0), 'down': float(d.get('downSpeed') or 0)})
-    return out
+        link = 'wired' if k.startswith('pc') else 'wifi'
+        if str(d.get('type') or '').lower() == 'phone':
+            link = 'wifi'
+        row = {'key': dk, 'name': name, 'ip': ip, 'link': link,
+               'up': float(d.get('upSpeed') or 0), 'down': float(d.get('downSpeed') or 0)}
+        old = seen.get(dk)
+        # 同 IP 两条记录（双宿/换表瞬间）：留流量大的，平手按有线
+        if old is None or ((row['up'] + row['down'], row['link'] == 'wired') >
+                           (old['up'] + old['down'], old['link'] == 'wired')):
+            seen[dk] = row
+    return list(seen.values())
 
 
 class Collector(object):
@@ -189,31 +155,11 @@ class Collector(object):
         self.cfg = {}
         self.gw = None
         self.buf = []
-        self.known = {}          # devkey -> (name, ip, last_seen_ts)
+        self.known = {}          # devkey -> (name, ip, last_seen_ts, link)
         self.cfg_ts = 0.0
         self.on_ts = 0.0          # 最近一次「只拉开关」的时间
         self.off_log = 0.0        # 暂停期间日志节流
         self.up_log = 0.0         # 上传日志节流（间隔缩小后不然刷屏）
-        self.links = {}          # ip -> wired/wifi（60s 缓存）
-        self.link_ts = 0.0
-
-    # ---------- 链路类型（有线/无线）----------
-    def link_map(self):
-        """60 秒刷一次；devInfo 挂了就沿用上次结果（拿不到就空，不影响采样）。"""
-        if self.links and time.time() - self.link_ts < 60:
-            return self.links
-        gw = self.gateway()
-        m = {}
-        try:
-            m.update(gw.dev_info('0'))
-            m.update(gw.dev_info('1'))
-        except Exception as e:  # noqa: BLE001
-            log('读链路类型失败（忽略）：%s' % e)
-            return self.links
-        if m:
-            self.links = m
-            self.link_ts = time.time()
-        return self.links
 
     # ---------- 服务器：配置 ----------
     def refresh_cfg(self):
@@ -310,23 +256,22 @@ class Collector(object):
             return 0
 
         now = int(time.time())
-        links = self.link_map()
         n = 0
         seen = set()
         for d in devs:
             seen.add(d['key'])
-            self.known[d['key']] = (d['name'], d['ip'], now)
+            self.known[d['key']] = (d['name'], d['ip'], now, d.get('link') or '')
             self.buf.append([now, d['key'], d['name'], d['ip'], 1, d['up'], d['down'],
-                             links.get(d['ip'], '')])
+                             d.get('link') or ''])
             n += 1
-        # 缺席设备补 present=0（网关/休眠/离线都能看出来）
-        for dk, (name, ip, last) in list(self.known.items()):
+        # 缺席设备补 present=0（网关/休眠/离线都能看出来）；链路沿用它自己最近一次
+        for dk, (name, ip, last, lk) in list(self.known.items()):
             if dk in seen:
                 continue
             if now - last > ABSENT_TTL:
                 self.known.pop(dk, None)
                 continue
-            self.buf.append([now, dk, name, ip, 0, 0.0, 0.0, links.get(ip, '')])
+            self.buf.append([now, dk, name, ip, 0, 0.0, 0.0, lk])
         return n
 
     def selfcheck(self):
@@ -350,12 +295,9 @@ class Collector(object):
                 devs = parse_allinfo(txt)
                 log('✓ 数据：解析出 %d 台设备（示例：%s）'
                     % (len(devs), devs[0] if devs else '—'))
-                try:
-                    lm = gw.dev_info('0')
-                    lm.update(gw.dev_info('1'))
-                    log('✓ 链路：拿到 %d 台的 有线/无线' % len(lm))
-                except Exception as e:  # noqa: BLE001
-                    log('~ 链路：拿不到（不影响采集）：%s' % e)
+                wl = sum(1 for x in devs if x.get('link') == 'wifi')
+                log('✓ 链路：无线 %d 台 / 有线 %d 台（手机一律按无线，含挂在子路由/AP 下的）'
+                    % (wl, len(devs) - wl))
         n = self.flush()
         if self.upload:
             log('✓ 上传：%d 条' % n)
