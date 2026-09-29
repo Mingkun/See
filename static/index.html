@@ -316,7 +316,7 @@
       <button type="button" onclick="anLoad()" class="btn">刷新</button>
     </div>
     <div class="pbody mt-1"><svg id="anChart" class="chart-svg"></svg></div>
-    <div  class="sub legend"><span id="anAxisTxt">横轴 0–24 时</span> · 纵轴为下行+上行速率（对数显示），柱高=均值、柱色按合计（上行+下行）峰值分档，柱内横线上方上行、下方下行；浅黄虚线 = 合计峰值 1 M/s；<span class="c-busy">▬</span> 繁忙 · <span class="c-chill">▬</span> 轻量 · <span class="c-idle">▬</span> 空闲 · <span class="c-muted">▬</span> 无数据</div>
+    <div  class="sub legend"><span id="anAxisTxt">横轴 0–24 时</span> · 纵轴为下行+上行速率（对数显示），柱高与柱色都按合计（上行+下行）峰值；浅黄虚线 = 合计峰值 1 M/s；<span class="c-busy">▬</span> 繁忙 · <span class="c-chill">▬</span> 轻量 · <span class="c-idle">▬</span> 空闲 · <span class="c-muted">▬</span> 无数据</div>
     <div id="anLegend"  class="sub legend"></div>
   </div>
   <div class="panel" id="anLivePanel">
@@ -1441,26 +1441,17 @@ function anRender(j){
     var stt = tier === 'none' ? '无数据' : (tier === 'off' ? '不在线' : (tier === 'busy' ? '繁忙' : (tier === 'chill' ? '轻量' : '空闲')));
     var tfill = tier === 'busy' ? '#2563eb' : (tier === 'chill' ? '#16a34a' : '#69737f');
     var avUp = (upA && c) ? su / c : av / 2, avDn = (dnA && c) ? sd / c : av / 2;
-    bars.push({ x0: x0, x1: x0 + bw, tip: (isCur ? '⏱ 当前时段<br>' : '') + '<b>' + anHMin(t0) + '–' + anHMin(t1) + '</b><br>均 ' + fmtSpeed(av) + '（下 ' + fmtSpeed(avDn) + ' · 上 ' + fmtSpeed(avUp) + '）<br>峰 ' + fmtSpeed(pk) + '（合计）· ' + stt });
+    bars.push({ x0: x0, x1: x0 + bw, tip: (isCur ? '⏱ 当前时段<br>' : '') + '<b>' + anHMin(t0) + '–' + anHMin(t1) + '</b><br>峰 ' + fmtSpeed(pk) + '（合计，柱高）· ' + stt + '<br>均 ' + fmtSpeed(av) + '（下 ' + fmtSpeed(avDn) + ' · 上 ' + fmtSpeed(avUp) + '）' });
     var rw = Math.max(bw - 0.4, 0.6).toFixed(2), fw = Math.max(bw, 0.6).toFixed(2);
     var curCls = isCur ? ' class="curblink"' : '';
     if (!any) p.push('<rect x="' + x0.toFixed(2) + '" y="' + padT + '" width="' + fw + '" height="' + ih + '" fill="#e9edf3"' + curCls + '/>');
     else if (!pres) p.push('<rect x="' + x0.toFixed(2) + '" y="' + padT + '" width="' + fw + '" height="' + ih + '" fill="#d7e4ff"' + curCls + '/>');
-    else if (av > 0){
-      var ytop = yv(av);
-      var ybase = padT + ih, hTot = ybase - ytop;
+    else if (pk > 0){
+      // 柱高 = 该格合计峰值（不再按均值、也不再分上下行两段）
+      var ytop = yv(pk);
+      var hTot = padT + ih - ytop;
       if (hTot < 0.8) hTot = 0.8;
-      // 柱内分两段：下半段下行、上半段上行，中间画一道白横线隔开
-      if (avUp > 0 && avDn > 0 && hTot >= 3){
-        var hDn = hTot * (avDn / av);
-        if (hDn < 1.2) hDn = 1.2;
-        if (hDn > hTot - 1.2) hDn = hTot - 1.2;
-        var hUp = hTot - hDn, yS = ybase - hDn;
-        p.push('<rect x="' + x0.toFixed(2) + '" y="' + (yS - hUp).toFixed(1) + '" width="' + rw + '" height="' + hUp.toFixed(1) + '" fill="' + tfill + '" rx="0.6"' + curCls + '/>');
-        p.push('<line x1="' + x0.toFixed(2) + '" y1="' + yS.toFixed(1) + '" x2="' + (x0 + bw).toFixed(2) + '" y2="' + yS.toFixed(1) + '" stroke="#ffffff" stroke-width="1" pointer-events="none"/>');
-        p.push('<rect x="' + x0.toFixed(2) + '" y="' + yS.toFixed(1) + '" width="' + rw + '" height="' + hDn.toFixed(1) + '" fill="' + tfill + '" rx="0.6"' + curCls + '/>');
-      }
-      else p.push('<rect x="' + x0.toFixed(2) + '" y="' + ytop.toFixed(1) + '" width="' + rw + '" height="' + hTot.toFixed(1) + '" fill="' + tfill + '" rx="0.6"' + curCls + '/>');
+      p.push('<rect x="' + x0.toFixed(2) + '" y="' + ytop.toFixed(1) + '" width="' + rw + '" height="' + hTot.toFixed(1) + '" fill="' + tfill + '" rx="0.6"' + curCls + '/>');
     }
     else p.push('<rect x="' + x0.toFixed(2) + '" y="' + (padT + ih - 2) + '" width="' + rw + '" height="2" fill="' + tfill + '"' + curCls + '/>');
   }
@@ -1528,7 +1519,7 @@ function anRender(j){
   document.getElementById('anSub').textContent = (j.name || j.ip || AN.key) + ' · ' + anFmtDur(n) + '窗口';
   document.getElementById('anAxisTxt').textContent = '横轴 0–' + HRS + ' 时';
   document.getElementById('anLegend').innerHTML = '采样覆盖 ' + (cover / n * 100).toFixed(0) + '%（' + anFmtDur(cover) + '） · 空闲 ' + runs.length + ' 段 · 空闲阈值 ' + fmtSpeed(AN_THR) + (curG >= 0 ? ' · <span class="c-muted">持续闪动 = 当前时段</span>' : '');
-  document.getElementById('anHint').textContent = '数据来自 app 运行期间对网关的采样（每 10 秒 1 次），app 关闭期间不采集；曲线为 5 分钟一格的速率均值。';
+  document.getElementById('anHint').textContent = '数据来自 app 运行期间对网关的采样（每 10 秒 1 次），app 关闭期间不采集；柱高为 5 分钟一格的合计速率峰值。';
 }
 
 /* ===== 柱状图：双击进全屏（横屏）+ 点选时间点看数据 ===== */
