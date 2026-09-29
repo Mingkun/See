@@ -316,8 +316,7 @@
       <button type="button" onclick="anLoad()" class="btn">刷新</button>
     </div>
     <div class="pbody mt-1"><svg id="anChart" class="chart-svg"></svg></div>
-    <div  class="sub legend"><span id="anAxisTxt">横轴 0–24 时</span> · 纵轴为下行+上行速率（对数显示），柱高与柱色都按合计（上行+下行）峰值；浅黄虚线 = 合计峰值 1 M/s；<span class="c-busy">▬</span> 繁忙 · <span class="c-chill">▬</span> 轻量 · <span class="c-idle">▬</span> 空闲 · <span class="c-muted">▬</span> 无数据</div>
-    <div id="anLegend"  class="sub legend"></div>
+    <div class="sub legend"><span class="c-busy">▬</span> 繁忙 · <span class="c-chill">▬</span> 轻量 · <span class="c-idle">▬</span> 空闲 · <span class="c-muted">▬</span> 无数据。<span id="anDurTxt"></span></div>
   </div>
   <div class="panel" id="anLivePanel">
     <div class="pt"><span>⚡ 实时<span class="sub sub-inline" id="anLiveDev">选定终端</span></span><span class="sub" id="anLiveAge">—</span></div>
@@ -1394,6 +1393,7 @@ var AN_THR = 4096;        // 空闲阈值（平均速率，用于空闲时段统
 var AN_BUSY = 1048576;    // 「繁忙」阈值 = 合计（上行+下行）峰值 ≥ 1 M/s；柱色、虚线、分时用量状态共用这一个值
 function anDayLbl(sec){ var d = new Date(sec * 1000); return (d.getMonth() + 1) + '-' + d.getDate(); }
 function anHMin(sec){ var d = new Date(sec * 1000); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
+function anDur2(min){ var h = Math.floor(min / 60), m = min % 60; return h + 'H' + (m < 10 ? '0' : '') + m + 'M'; }
 function anFmtDur(min){ if (min < 60) return Math.round(min) + '分'; return Math.floor(min / 60) + '时' + (Math.round(min % 60) ? Math.round(min % 60) + '分' : ''); }
 function anRender(j){
   AN.last = j;
@@ -1427,6 +1427,7 @@ function anRender(j){
   p.push('<line x1="' + padL + '" y1="' + (padT + ih) + '" x2="' + (padL + iw) + '" y2="' + (padT + ih) + '" stroke="#dfe5ee"/>');
   p.push('<text x="4" y="' + (padT + 8) + '" font-size="8" fill="#9aa4b2">' + fmtSpeed(maxV) + '</text>');
   var bw = iw / groups, bars = [];
+  var durMin = { busy: 0, chill: 0, idle: 0, none: 0 };   // 窗口内各状态累计时长（分钟），只累到当前所在的 5 分钟
   var nowSec = j.now || Math.floor(Date.now() / 1000);
   // 当前时段 = 覆盖 now 的那一格（与分时用量表的 .curhour 同一格），整柱缓慢闪动标识
   var curG = (nowSec >= from && nowSec < from + n * 60) ? Math.floor((nowSec - from) / (G * 60)) : -1;
@@ -1440,6 +1441,8 @@ function anRender(j){
     var tier = !any ? 'none' : (!pres ? 'off' : (pk >= PKTH ? 'busy' : (pk > 0 ? 'chill' : 'idle')));
     var stt = tier === 'none' ? '无数据' : (tier === 'off' ? '不在线' : (tier === 'busy' ? '繁忙' : (tier === 'chill' ? '轻量' : '空闲')));
     var tfill = tier === 'busy' ? '#2563eb' : (tier === 'chill' ? '#16a34a' : '#69737f');
+    // 「不在线」在四档图例里并入「无数据」；未到时间的格子不计入任何档
+    if (curG < 0 || g <= curG) durMin[tier === 'off' ? 'none' : tier] += G;
     var avUp = (upA && c) ? su / c : av / 2, avDn = (dnA && c) ? sd / c : av / 2;
     bars.push({ x0: x0, x1: x0 + bw, tip: (isCur ? '⏱ 当前时段<br>' : '') + '<b>' + anHMin(t0) + '–' + anHMin(t1) + '</b><br>峰 ' + fmtSpeed(pk) + '（合计，柱高）· ' + stt + '<br>均 ' + fmtSpeed(av) + '（下 ' + fmtSpeed(avDn) + ' · 上 ' + fmtSpeed(avUp) + '）' });
     var rw = Math.max(bw - 0.4, 0.6).toFixed(2), fw = Math.max(bw, 0.6).toFixed(2);
@@ -1517,8 +1520,7 @@ function anRender(j){
   paintHourRows();
   var cover = 0; for (var q = 0; q < n; q++) if (hs[q]) cover++;
   document.getElementById('anSub').textContent = (j.name || j.ip || AN.key) + ' · ' + anFmtDur(n) + '窗口';
-  document.getElementById('anAxisTxt').textContent = '横轴 0–' + HRS + ' 时';
-  document.getElementById('anLegend').innerHTML = '采样覆盖 ' + (cover / n * 100).toFixed(0) + '%（' + anFmtDur(cover) + '） · 空闲 ' + runs.length + ' 段 · 空闲阈值 ' + fmtSpeed(AN_THR) + (curG >= 0 ? ' · <span class="c-muted">持续闪动 = 当前时段</span>' : '');
+  document.getElementById('anDurTxt').textContent = HRS + '小时内，繁忙:' + anDur2(durMin.busy) + '，轻量:' + anDur2(durMin.chill) + '，空闲:' + anDur2(durMin.idle) + '，无数据:' + anDur2(durMin.none);
   document.getElementById('anHint').textContent = '数据来自 app 运行期间对网关的采样（每 10 秒 1 次），app 关闭期间不采集；柱高为 5 分钟一格的合计速率峰值。';
 }
 
