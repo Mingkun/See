@@ -1091,12 +1091,11 @@ function topoNode(x, y, d, wired){
      + esc(fmtSpeed(d.up)) + '</text>';
   return s;
 }
-/* 网关自身：主网关会把自己也列进设备表（占个内部/历史 IP、0 流量，如 华为OptiXstar@.3）。
-   拓扑里不当普通设备画，并进根节点显示型号。 */
+/* 网关自身：只有 IP 与采集器登录的网关地址完全一致才算，并进根节点。
+   不按名字猜（用户指出 华为OptiXstar@.3 可能是另一台实体光猫）——
+   名字像光猫但 IP 对不上的，照常当普通设备画。 */
 function isGwSelf(d){
-  if (String(d.ip || '') && String(d.ip) === String(GW.ip || '')) return true;
-  var n = String(d.name || '').toLowerCase();
-  return n.indexOf('光猫') >= 0 || n.indexOf('optixstar') >= 0 || n.indexOf('optistar') >= 0;
+  return !!(String(d.ip || '') && String(d.ip) === String(GW.ip || ''));
 }
 /* AP/子路由识别：名字像路由器的当下挂 AP；网关自己、光猫、交换机不算 */
 function isApNode(d){
