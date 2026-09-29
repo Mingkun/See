@@ -1502,7 +1502,10 @@ function anRender(j){
   var rows = [];
   var nh = Math.floor(n / 5);   // 与柱状图一致：5 分钟一格
   var today = anDayLbl(j.now || Math.floor(Date.now() / 1000));
-  for (var h3 = 0; h3 < nh; h3++){
+  // 还没到的时段不提前列出来：只到「此刻所在的 5 分钟」为止（与柱状图闪动的那格同一索引）
+  var lastH = (j.now && j.now >= from) ? Math.floor((j.now - from) / 300) : nh - 1;
+  if (lastH > nh - 1) lastH = nh - 1;
+  for (var h3 = 0; h3 <= lastH; h3++){
     var kEnd = Math.min((h3 + 1) * 5, n);
     var tot = 0, mx = 0, ct2 = 0, any2 = 0, pr2 = 0;
     for (var k2 = h3 * 5; k2 < kEnd; k2++){ if (hs[k2]) any2 = 1; if (pr[k2]) pr2 = 1; tot += sp[k2]; if (sp[k2] > mx) mx = sp[k2]; ct2++; }
