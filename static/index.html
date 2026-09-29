@@ -220,6 +220,7 @@
   #anLiveAge { flex:none; white-space:nowrap; }
   .legend { padding:6px var(--pad-x) 0; font-size:var(--fs-sm); color:var(--muted); }
   #anLeg3 { text-align:center; line-height:1.6; }
+  #lvHint { text-align:center; }
   .chart { display:flex; align-items:flex-end; gap:1px; height:70px; margin:8px 0 2px; }
   .chart .b { flex:1; background:#bfdbfe; border-radius:1px 1px 0 0; position:relative; }
   .chart .b i { position:absolute; left:0; right:0; bottom:0; background:#2563eb; border-radius:1px 1px 0 0; }
@@ -343,7 +344,7 @@
     <div class="hint" id="lvHint">—</div>
   </div>
   <div class="panel" id="anSleepPanel" style="display:none">
-    <div class="pt">😴 空闲<span class="sub sub-inline">（连续 ≥10 分钟无流量）</span></div>
+    <div class="pt">😴 轻量 + 空闲<span class="sub sub-inline">（连续 ≥10 分钟低速或无流量）</span></div>
     <div class="scrollx">
       <table>
         <thead><tr><th>时段</th><th>时长</th><th>类型</th><th>期间峰值</th></tr></thead>
@@ -1471,7 +1472,7 @@ function anLiveRender(j){
   else if (!j.on_n) hint.push('整个窗口里网关都标它不在线');
   else if (!j.present) hint.push('最新一档不在线（刚断开或休眠）');
   if (j.age >= 0 && j.age > 60) hint.push('数据 ' + j.age + ' 秒前才到服务器 · 微服采集器可能没跟上');
-  hint.push('中线以上=上行、以下=下行，两侧各自按窗口峰值缩放');
+  hint.push('中线以上=上行、以下=下行');
   anLiveMsg(hint.join('；'));
   anLiveBars(j);
 }
@@ -1636,15 +1637,32 @@ function anRender(j){
       if (sp[j2] > peak) peak = sp[j2];
       j2++;
     }
-    if (j2 - i2 >= 10) runs.push({ a: i2, b: j2, len: j2 - i2, peak: peak });
+    if (j2 - i2 >= 10) runs.push({ a: i2, b: j2, len: j2 - i2, peak: peak, lt: 0 });
     i2 = j2;
   }
+  // 连续「轻量」时段：分钟均速在 4KB/s–1MB/s 之间的连续段（同样 ≥10 分钟才算）
+  i2 = 0;
+  while (i2 < n){
+    var lit = hs[i2] && pr[i2] && sp[i2] >= AN_THR && sp[i2] < AN_BUSY;
+    if (!lit) { i2++; continue; }
+    var j3 = i2, pk3 = 0;
+    while (j3 < n){
+      var lit2 = hs[j3] && pr[j3] && sp[j3] >= AN_THR && sp[j3] < AN_BUSY;
+      if (!lit2) break;
+      if (sp[j3] > pk3) pk3 = sp[j3];
+      j3++;
+    }
+    if (j3 - i2 >= 10) runs.push({ a: i2, b: j3, len: j3 - i2, peak: pk3, lt: 1 });
+    i2 = j3;
+  }
+  runs.sort(function(x, y){ return x.a - y.a; });
   var sb = document.getElementById('anSleepBody');
-  if (!runs.length) { sb.innerHTML = '<tr><td colspan="4" class="hint">没找到 ≥10 分钟的空闲时段</td></tr>'; }
+  if (!runs.length) { sb.innerHTML = '<tr><td colspan="4" class="hint">没找到 ≥10 分钟的轻量/空闲时段</td></tr>'; }
   else {
-    sb.innerHTML = runs.map(function(r){
-      return '<tr><td class="num">' + anHMin(from + r.a * 60) + '–' + anHMin(from + r.b * 60) + '</td><td class="num">' + anFmtDur(r.len) + '</td><td class="sub">空闲</td><td class="num">' + fmtSpeed(r.peak) + '</td></tr>';
-    }).join('');
+    var shown = runs.slice(0, 40);
+    sb.innerHTML = shown.map(function(r){
+      return '<tr><td class="num">' + anHMin(from + r.a * 60) + '–' + anHMin(from + r.b * 60) + '</td><td class="num">' + anFmtDur(r.len) + '</td><td class="sub">' + (r.lt ? '<span class="c-chill">轻量</span>' : '<span class="c-idle">空闲</span>') + '</td><td class="num">' + fmtSpeed(r.peak) + '</td></tr>';
+    }).join('') + (runs.length > 40 ? '<tr><td colspan="4" class="hint">还有 ' + (runs.length - 40) + ' 段未显示</td></tr>' : '');
   }
   document.getElementById('anSleepPanel').style.display = '';
   var rows = [];
