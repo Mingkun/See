@@ -313,7 +313,7 @@
       <button type="button" onclick="anLoad()" class="btn">刷新</button>
     </div>
     <div class="pbody mt-1"><svg id="anChart" class="chart-svg"></svg></div>
-    <div  class="sub legend"><span id="anAxisTxt">横轴 0–24 时</span> · 纵轴为下行+上行速率（对数显示），柱色按峰值分档，柱内横线上方上行、下方下行；浅黄虚线 = 下行峰值 1 M/s；<span class="c-busy">▬</span> 繁忙 · <span class="c-chill">▬</span> 轻量 · <span class="c-idle">▬</span> 空闲 · <span class="c-muted">▬</span> 无数据</div>
+    <div  class="sub legend"><span id="anAxisTxt">横轴 0–24 时</span> · 纵轴为下行+上行速率（对数显示），柱高=均值、柱色按合计（上行+下行）峰值分档，柱内横线上方上行、下方下行；浅黄虚线 = 合计峰值 1 M/s；<span class="c-busy">▬</span> 繁忙 · <span class="c-chill">▬</span> 轻量 · <span class="c-idle">▬</span> 空闲 · <span class="c-muted">▬</span> 无数据</div>
     <div id="anLegend"  class="sub legend"></div>
   </div>
   <div class="panel" id="anLivePanel">
@@ -1388,7 +1388,7 @@ function anLoad(){
     .catch(function(){ document.getElementById('anSub').textContent = '服务器连接失败'; });
 }
 var AN_THR = 4096;        // 空闲阈值（平均速率，用于空闲时段统计）
-var AN_BUSY = 1048576;    // 分时用量「繁忙」阈值：峰值 ≥ 1 M/s
+var AN_BUSY = 1048576;    // 「繁忙」阈值 = 合计（上行+下行）峰值 ≥ 1 M/s；柱色、虚线、分时用量状态共用这一个值
 function anDayLbl(sec){ var d = new Date(sec * 1000); return (d.getMonth() + 1) + '-' + d.getDate(); }
 function anHMin(sec){ var d = new Date(sec * 1000); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
 function anFmtDur(min){ if (min < 60) return Math.round(min) + '分'; return Math.floor(min / 60) + '时' + (Math.round(min % 60) ? Math.round(min % 60) + '分' : ''); }
@@ -1404,6 +1404,7 @@ function anRender(j){
   var padL = 34, padR = 6, padT = 10, padB = 18;
   var iw = W - padL - padR, ih = H - padT - padB;
   var G = 5, groups = Math.ceil(n / G);
+  var PKTH = AN_BUSY;   // 「合计峰值」阈值：既判柱色，也是那条虚线的位置
   // 横轴跟随所选窗口（24/12/6 小时），此前写死 0–24、步长 4
   var HRS = Math.max(1, Math.round(n / 60));
   var STEPS = [1, 2, 3, 4, 6, 8, 12, 24], step = 24;
@@ -1433,11 +1434,11 @@ function anRender(j){
     var t0 = from + g * G * 60, t1 = from + Math.min((g + 1) * G, n) * 60;
     // 状态三档与「分时用量」一致：按峰值判 繁忙/轻量/空闲
     var isCur = (g === curG);
-    var tier = !any ? 'none' : (!pres ? 'off' : (pk >= AN_BUSY ? 'busy' : (pk > 0 ? 'chill' : 'idle')));
+    var tier = !any ? 'none' : (!pres ? 'off' : (pk >= PKTH ? 'busy' : (pk > 0 ? 'chill' : 'idle')));
     var stt = tier === 'none' ? '无数据' : (tier === 'off' ? '不在线' : (tier === 'busy' ? '繁忙' : (tier === 'chill' ? '轻量' : '空闲')));
     var tfill = tier === 'busy' ? '#2563eb' : (tier === 'chill' ? '#16a34a' : '#69737f');
     var avUp = (upA && c) ? su / c : av / 2, avDn = (dnA && c) ? sd / c : av / 2;
-    bars.push({ x0: x0, x1: x0 + bw, tip: (isCur ? '⏱ 当前时段<br>' : '') + '<b>' + anHMin(t0) + '–' + anHMin(t1) + '</b><br>均 ' + fmtSpeed(av) + '（下 ' + fmtSpeed(avDn) + ' · 上 ' + fmtSpeed(avUp) + '）<br>峰 ' + fmtSpeed(pk) + ' · ' + stt });
+    bars.push({ x0: x0, x1: x0 + bw, tip: (isCur ? '⏱ 当前时段<br>' : '') + '<b>' + anHMin(t0) + '–' + anHMin(t1) + '</b><br>均 ' + fmtSpeed(av) + '（下 ' + fmtSpeed(avDn) + ' · 上 ' + fmtSpeed(avUp) + '）<br>峰 ' + fmtSpeed(pk) + '（合计）· ' + stt });
     var rw = Math.max(bw - 0.4, 0.6).toFixed(2), fw = Math.max(bw, 0.6).toFixed(2);
     var curCls = isCur ? ' class="curblink"' : '';
     if (!any) p.push('<rect x="' + x0.toFixed(2) + '" y="' + padT + '" width="' + fw + '" height="' + ih + '" fill="#e9edf3"' + curCls + '/>');
@@ -1460,11 +1461,13 @@ function anRender(j){
     }
     else p.push('<rect x="' + x0.toFixed(2) + '" y="' + (padT + ih - 2) + '" width="' + rw + '" height="2" fill="' + tfill + '"' + curCls + '/>');
   }
-  // 下行峰值参考线：1 M/s（浅黄虚线，只在量程能装下时画，否则贴顶会误导）
-  if (maxV >= AN_BUSY){
-    var yRef = yv(AN_BUSY), labY = (yRef - padT < 10) ? yRef + 9 : yRef - 3;
+  // 合计（上行+下行）峰值参考线：1 M/s（浅黄虚线）。位置与柱色的分档阈值同源（都用 PKTH），
+  // 且取在总量程上，所以线代表的就是「合计峰值」本身，不只是标签这么写。
+  // 只在量程装得下时画：yv() 对超过量程的值会贴顶 clamp，全窗口都不到阈值时硬画会停住骗人。
+  if (maxV >= PKTH){
+    var yRef = yv(PKTH), labY = (yRef - padT < 10) ? yRef + 9 : yRef - 3;
     p.push('<line x1="' + padL + '" y1="' + yRef.toFixed(1) + '" x2="' + (padL + iw) + '" y2="' + yRef.toFixed(1) + '" stroke="#e8c94f" stroke-width="1.2" stroke-dasharray="4 3" pointer-events="none"/>');
-    p.push('<text x="' + (padL + iw - 1).toFixed(1) + '" y="' + labY.toFixed(1) + '" font-size="8" fill="#c2a52f" text-anchor="end" pointer-events="none">下行峰值 1 M/s</text>');
+    p.push('<text x="' + (padL + iw - 1).toFixed(1) + '" y="' + labY.toFixed(1) + '" font-size="8" fill="#c2a52f" text-anchor="end" pointer-events="none">合计峰值 1 M/s</text>');
   }
   if (svg.__sel != null && bars[svg.__sel]) p.push(chartMarkRect(bars[svg.__sel], padT, ih));
   svg.__bars = bars;
