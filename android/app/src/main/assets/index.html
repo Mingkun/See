@@ -163,6 +163,9 @@
   .ddopt:active { background:#f6f8fb; }
   /* 分时用量：今天的行黑字白底、昨天的行黑字灰底；当前小时红字闪动、白底 */
   /* 状态列只有 2 字，固定不换行，手机窄屏也挤在一行 */
+  /* 分时用量改为 5 分钟一格后行数变多：本表专用紧凑行高（约为普通表一半），字号降一档 */
+  #anHourTbl td { padding:3px 8px; font-size:var(--fs-md); line-height:1.25; }
+  #anHourTbl th { padding:5px 8px; font-size:var(--fs-xs); }
   #anHourBody td:last-child { white-space:nowrap; }
   #anHourBody td:last-child span { font-size:var(--fs-sm); white-space:nowrap; }
   #anSleepBody td:nth-child(3) { white-space:nowrap; }
@@ -345,10 +348,10 @@
     </div>
   </div>
   <div class="panel">
-    <div class="pt"><span>📊 分时用量（1 小时一格）</span><button type="button" class="btn sm" id="anHourOrder" onclick="toggleHourOrder()">↓ 倒序</button></div>
+    <div class="pt"><span>📊 分时用量（5 分钟一格）</span><button type="button" class="btn sm" id="anHourOrder" onclick="toggleHourOrder()">↓ 倒序</button></div>
     <div class="scrollx">
-      <table>
-        <thead><tr><th>小时</th><th>平均速率</th><th>峰值</th><th>状态</th></tr></thead>
+      <table id="anHourTbl">
+        <thead><tr><th>时段</th><th>平均速率</th><th>峰值</th><th>状态</th></tr></thead>
         <tbody id="anHourBody"><tr><td colspan="4" class="hint">—</td></tr></tbody>
       </table>
     </div>
@@ -1497,20 +1500,21 @@ function anRender(j){
   }
   document.getElementById('anSleepPanel').style.display = '';
   var rows = [];
-  var nh = Math.floor(n / 60);
+  var nh = Math.floor(n / 5);   // 与柱状图一致：5 分钟一格
   var today = anDayLbl(j.now || Math.floor(Date.now() / 1000));
   for (var h3 = 0; h3 < nh; h3++){
+    var kEnd = Math.min((h3 + 1) * 5, n);
     var tot = 0, mx = 0, ct2 = 0, any2 = 0, pr2 = 0;
-    for (var k2 = h3 * 60; k2 < (h3 + 1) * 60; k2++){ if (hs[k2]) any2 = 1; if (pr[k2]) pr2 = 1; tot += sp[k2]; if (sp[k2] > mx) mx = sp[k2]; ct2++; }
+    for (var k2 = h3 * 5; k2 < kEnd; k2++){ if (hs[k2]) any2 = 1; if (pr[k2]) pr2 = 1; tot += sp[k2]; if (sp[k2] > mx) mx = sp[k2]; ct2++; }
     var st;
     if (!any2) st = '<span class="sub">无</span>';
     else if (mx >= AN_BUSY) st = '<span class="c-busy">繁忙</span>';
     else if (mx > 0) st = '<span class="c-chill">轻量</span>';
     else st = '<span class="c-idle">空闲</span>';
-    var t0 = from + h3 * 3600, t1 = t0 + 3600;
+    var t0 = from + h3 * 300, t1 = t0 + 300;
     // 行序即时间先后（由早到晚，索引 0 为窗口起点）
     var hlbl = anHMin(t0) + '–' + anHMin(t1);
-    var cur = j.now && t1 > j.now;   // 覆盖 now 的那一格 = 当前小时
+    var cur = j.now && t1 > j.now;   // 覆盖 now 的那一格 = 当前 5 分钟（与柱状图闪动的那根同格）
     // 底色按自然日区分；不写日期文字
     var rcls = (cur || anDayLbl(t0) === today) ? 'today' : 'prev';
     rows.push('<tr class="' + rcls + '"><td class="num' + (cur ? ' curhour' : '') + '">' + hlbl + '</td><td class="num">' + fmtSpeed(tot / ct2) + '</td><td class="num">' + fmtSpeed(mx) + '</td><td>' + st + '</td></tr>');
