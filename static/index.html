@@ -313,7 +313,7 @@
       <button type="button" onclick="anLoad()" class="btn">刷新</button>
     </div>
     <div class="pbody mt-1"><svg id="anChart" class="chart-svg"></svg></div>
-    <div  class="sub legend"><span id="anAxisTxt">横轴 0–24 时</span> · 纵轴为下行+上行速率（对数显示），柱色按峰值分档；<span class="c-busy">▬</span> 繁忙 · <span class="c-chill">▬</span> 轻量 · <span class="c-idle">▬</span> 空闲 · <span class="c-muted">▬</span> 无数据</div>
+    <div  class="sub legend"><span id="anAxisTxt">横轴 0–24 时</span> · 纵轴为下行+上行速率（对数显示），柱色按峰值分档，柱内横线上方上行、下方下行；<span class="c-busy">▬</span> 繁忙 · <span class="c-chill">▬</span> 轻量 · <span class="c-idle">▬</span> 空闲 · <span class="c-muted">▬</span> 无数据</div>
     <div id="anLegend"  class="sub legend"></div>
   </div>
   <div class="panel" id="anLivePanel">
@@ -1395,6 +1395,7 @@ function anFmtDur(min){ if (min < 60) return Math.round(min) + '分'; return Mat
 function anRender(j){
   AN.last = j;
   var sp = j.speed || [], pr = j.present || [], hs = j.has || [];
+  var upA = j.up || null, dnA = j.down || null;   // 新服务端会分别给上行/下行，旧服务端回退为均分
   var n = sp.length || j.minutes || 1440;
   var from = j.frm || j.from || 0;
   var svg = document.getElementById('anChart');
@@ -1423,11 +1424,11 @@ function anRender(j){
   p.push('<text x="4" y="' + (padT + 8) + '" font-size="8" fill="#9aa4b2">' + fmtSpeed(maxV) + '</text>');
   var bw = iw / groups, bars = [];
   var nowSec = j.now || Math.floor(Date.now() / 1000);
-  // 当前时段 = 覆盖 now 的那一格（与分时用量表的 .curhour 同一格），用红色标识
+  // 当前时段 = 覆盖 now 的那一格（与分时用量表的 .curhour 同一格），整柱缓慢闪动标识
   var curG = (nowSec >= from && nowSec < from + n * 60) ? Math.floor((nowSec - from) / (G * 60)) : -1;
   for (var g = 0; g < groups; g++){
-    var s = 0, c = 0, any = 0, pres = 0, pk = 0;
-    for (var k = g * G; k < Math.min((g + 1) * G, n); k++){ if (hs[k]) any = 1; if (pr[k]) pres = 1; s += sp[k]; if (sp[k] > pk) pk = sp[k]; c++; }
+    var s = 0, c = 0, any = 0, pres = 0, pk = 0, su = 0, sd = 0;
+    for (var k = g * G; k < Math.min((g + 1) * G, n); k++){ if (hs[k]) any = 1; if (pr[k]) pres = 1; s += sp[k]; if (sp[k] > pk) pk = sp[k]; if (upA) { su += upA[k] || 0; sd += dnA[k] || 0; } c++; }
     var x0 = padL + g * bw, av = c ? s / c : 0;
     var t0 = from + g * G * 60, t1 = from + Math.min((g + 1) * G, n) * 60;
     // 状态三档与「分时用量」一致：按峰值判 繁忙/轻量/空闲
@@ -1435,14 +1436,27 @@ function anRender(j){
     var tier = !any ? 'none' : (!pres ? 'off' : (pk >= AN_BUSY ? 'busy' : (pk > 0 ? 'chill' : 'idle')));
     var stt = tier === 'none' ? '无数据' : (tier === 'off' ? '不在线' : (tier === 'busy' ? '繁忙' : (tier === 'chill' ? '轻量' : '空闲')));
     var tfill = tier === 'busy' ? '#2563eb' : (tier === 'chill' ? '#16a34a' : '#69737f');
-    bars.push({ x0: x0, x1: x0 + bw, tip: (isCur ? '⏱ 当前时段<br>' : '') + '<b>' + anHMin(t0) + '–' + anHMin(t1) + '</b><br>均 ' + fmtSpeed(av) + ' · 峰 ' + fmtSpeed(pk) + '<br>' + stt });
+    var avUp = (upA && c) ? su / c : av / 2, avDn = (dnA && c) ? sd / c : av / 2;
+    bars.push({ x0: x0, x1: x0 + bw, tip: (isCur ? '⏱ 当前时段<br>' : '') + '<b>' + anHMin(t0) + '–' + anHMin(t1) + '</b><br>均 ' + fmtSpeed(av) + '（下 ' + fmtSpeed(avDn) + ' · 上 ' + fmtSpeed(avUp) + '）<br>峰 ' + fmtSpeed(pk) + ' · ' + stt });
     var rw = Math.max(bw - 0.4, 0.6).toFixed(2), fw = Math.max(bw, 0.6).toFixed(2);
     var curCls = isCur ? ' class="curblink"' : '';
     if (!any) p.push('<rect x="' + x0.toFixed(2) + '" y="' + padT + '" width="' + fw + '" height="' + ih + '" fill="#e9edf3"' + curCls + '/>');
     else if (!pres) p.push('<rect x="' + x0.toFixed(2) + '" y="' + padT + '" width="' + fw + '" height="' + ih + '" fill="#d7e4ff"' + curCls + '/>');
     else if (av > 0){
       var ytop = yv(av);
-      p.push('<rect x="' + x0.toFixed(2) + '" y="' + ytop.toFixed(1) + '" width="' + rw + '" height="' + Math.max(padT + ih - ytop, 0.8).toFixed(1) + '" fill="' + tfill + '" rx="0.6"' + curCls + '/>');
+      var ybase = padT + ih, hTot = ybase - ytop;
+      if (hTot < 0.8) hTot = 0.8;
+      // 柱内分两段：下半段下行、上半段上行，中间画一道白横线隔开
+      if (avUp > 0 && avDn > 0 && hTot >= 3){
+        var hDn = hTot * (avDn / av);
+        if (hDn < 1.2) hDn = 1.2;
+        if (hDn > hTot - 1.2) hDn = hTot - 1.2;
+        var hUp = hTot - hDn, yS = ybase - hDn;
+        p.push('<rect x="' + x0.toFixed(2) + '" y="' + (yS - hUp).toFixed(1) + '" width="' + rw + '" height="' + hUp.toFixed(1) + '" fill="' + tfill + '" rx="0.6"' + curCls + '/>');
+        p.push('<line x1="' + x0.toFixed(2) + '" y1="' + yS.toFixed(1) + '" x2="' + (x0 + bw).toFixed(2) + '" y2="' + yS.toFixed(1) + '" stroke="#ffffff" stroke-width="1" pointer-events="none"/>');
+        p.push('<rect x="' + x0.toFixed(2) + '" y="' + yS.toFixed(1) + '" width="' + rw + '" height="' + hDn.toFixed(1) + '" fill="' + tfill + '" rx="0.6"' + curCls + '/>');
+      }
+      else p.push('<rect x="' + x0.toFixed(2) + '" y="' + ytop.toFixed(1) + '" width="' + rw + '" height="' + hTot.toFixed(1) + '" fill="' + tfill + '" rx="0.6"' + curCls + '/>');
     }
     else p.push('<rect x="' + x0.toFixed(2) + '" y="' + (padT + ih - 2) + '" width="' + rw + '" height="2" fill="' + tfill + '"' + curCls + '/>');
   }

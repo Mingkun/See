@@ -764,6 +764,8 @@ def api_gw_series():
     frm = end - hours * 3600
     n = hours * 60
     speed = [0.0] * n
+    sup = [0.0] * n   # 上行均值（图表下半段用下行、上半段用上行）
+    sdn = [0.0] * n   # 下行均值
     cnt = [0] * n
     pres = [0] * n
     has = [0] * n
@@ -777,16 +779,20 @@ def api_gw_series():
         if r['present']:
             pres[m] = 1
             speed[m] += float(r['up'] or 0) + float(r['down'] or 0)
+            sup[m] += float(r['up'] or 0)
+            sdn[m] += float(r['down'] or 0)
             cnt[m] += 1
     for i in range(n):
         if cnt[i]:
             speed[i] = speed[i] / cnt[i]
+            sup[i] = sup[i] / cnt[i]
+            sdn[i] = sdn[i] / cnt[i]
     for k in store.gw_keys(frm):
         if k['key'] == key:
             name = k.get('name') or ''
             ip = k.get('ip') or ''
     return jsonify(ok=True, key=key, name=name, ip=ip, frm=frm, now=now, end=end, minutes=n,
-                   speed=speed, present=pres, has=has)
+                   speed=speed, up=sup, down=sdn, present=pres, has=has)
 
 
 @app.route('/api/gw/live', methods=['OPTIONS', 'GET'])
