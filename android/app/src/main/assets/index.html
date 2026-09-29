@@ -219,6 +219,7 @@
   #anLiveDev { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-left:0; }
   #anLiveAge { flex:none; white-space:nowrap; }
   .legend { padding:6px var(--pad-x) 0; font-size:var(--fs-sm); color:var(--muted); }
+  #anLeg3 { text-align:center; line-height:1.6; }
   .chart { display:flex; align-items:flex-end; gap:1px; height:70px; margin:8px 0 2px; }
   .chart .b { flex:1; background:#bfdbfe; border-radius:1px 1px 0 0; position:relative; }
   .chart .b i { position:absolute; left:0; right:0; bottom:0; background:#2563eb; border-radius:1px 1px 0 0; }
@@ -316,7 +317,7 @@
       <button type="button" onclick="anLoad()" class="btn">刷新</button>
     </div>
     <div class="pbody mt-1"><svg id="anChart" class="chart-svg"></svg></div>
-    <div class="sub legend"><span class="c-busy">▬</span> 繁忙 · <span class="c-chill">▬</span> 轻量 · <span class="c-idle">▬</span> 空闲 · <span class="c-muted">▬</span> 无数据。<span id="anDurTxt"></span></div>
+    <div class="sub legend" id="anLeg3"><span class="c-busy">▬</span> 繁忙 · <span class="c-chill">▬</span> 轻量 · <span class="c-idle">▬</span> 空闲 · <span class="c-muted">▬</span> 无数据<br>繁忙:<span id="anDurBusy"></span>，轻量:<span id="anDurChill"></span><br>空闲:<span id="anDurIdle"></span>，无数据:<span id="anDurNone"></span></div>
   </div>
   <div class="panel" id="anLivePanel">
     <div class="pt"><span>⚡ 实时<span class="sub sub-inline" id="anLiveDev">选定终端</span></span><span class="sub" id="anLiveAge">—</span></div>
@@ -1520,7 +1521,10 @@ function anRender(j){
   paintHourRows();
   var cover = 0; for (var q = 0; q < n; q++) if (hs[q]) cover++;
   document.getElementById('anSub').textContent = (j.name || j.ip || AN.key) + ' · ' + anFmtDur(n) + '窗口';
-  document.getElementById('anDurTxt').textContent = HRS + '小时内，繁忙:' + anDur2(durMin.busy) + '，轻量:' + anDur2(durMin.chill) + '，空闲:' + anDur2(durMin.idle) + '，无数据:' + anDur2(durMin.none);
+  document.getElementById('anDurBusy').textContent = anDur2(durMin.busy);
+  document.getElementById('anDurChill').textContent = anDur2(durMin.chill);
+  document.getElementById('anDurIdle').textContent = anDur2(durMin.idle);
+  document.getElementById('anDurNone').textContent = anDur2(durMin.none);
   document.getElementById('anHint').textContent = '数据来自 app 运行期间对网关的采样（每 10 秒 1 次），app 关闭期间不采集；柱高为 5 分钟一格的合计速率峰值。';
 }
 
