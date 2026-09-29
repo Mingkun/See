@@ -99,8 +99,8 @@
   .h2 { font-size:var(--fs-lg); font-weight:650; }
   .link { display:inline-block; margin-top:var(--sp-1); font-size:var(--fs-md); color:var(--brand); }
   .c-brand { color:var(--brand); } .c-warn { color:var(--warn); } .c-ok { color:var(--ok); }
-  /* 分时用量状态色：繁忙=橘红、放松=绿、空闲=灰 */
-  .c-busy { color:#ea580c; } .c-chill { color:var(--ok); } .c-idle { color:var(--muted); }
+  /* 状态色：繁忙=蓝、轻量=绿、空闲=灰 */
+  .c-busy { color:var(--brand); } .c-chill { color:var(--ok); } .c-idle { color:var(--muted); }
   .c-danger { color:var(--danger); } .c-muted { color:var(--muted); }
   /* 分析页当前时段：不额外染色，保持本档状态色，只做缓慢闪动 */
   @keyframes seeCurBlink { 0%,100% { opacity:1 } 50% { opacity:.28 } }
@@ -313,7 +313,7 @@
       <button type="button" onclick="anLoad()" class="btn">刷新</button>
     </div>
     <div class="pbody mt-1"><svg id="anChart" class="chart-svg"></svg></div>
-    <div  class="sub legend"><span id="anAxisTxt">横轴 0–24 时</span> · 纵轴为下行+上行速率（对数显示），柱色按峰值分档；<span class="c-brand">▬</span> 繁忙 · <span class="c-chill">▬</span> 放松 · <span class="c-idle">▬</span> 空闲 · <span class="c-muted">▬</span> 无数据</div>
+    <div  class="sub legend"><span id="anAxisTxt">横轴 0–24 时</span> · 纵轴为下行+上行速率（对数显示），柱色按峰值分档；<span class="c-busy">▬</span> 繁忙 · <span class="c-chill">▬</span> 轻量 · <span class="c-idle">▬</span> 空闲 · <span class="c-muted">▬</span> 无数据</div>
     <div id="anLegend"  class="sub legend"></div>
   </div>
   <div class="panel" id="anLivePanel">
@@ -1430,10 +1430,10 @@ function anRender(j){
     for (var k = g * G; k < Math.min((g + 1) * G, n); k++){ if (hs[k]) any = 1; if (pr[k]) pres = 1; s += sp[k]; if (sp[k] > pk) pk = sp[k]; c++; }
     var x0 = padL + g * bw, av = c ? s / c : 0;
     var t0 = from + g * G * 60, t1 = from + Math.min((g + 1) * G, n) * 60;
-    // 状态三档与「分时用量」一致：按峰值判 繁忙/放松/空闲
+    // 状态三档与「分时用量」一致：按峰值判 繁忙/轻量/空闲
     var isCur = (g === curG);
     var tier = !any ? 'none' : (!pres ? 'off' : (pk >= AN_BUSY ? 'busy' : (pk > 0 ? 'chill' : 'idle')));
-    var stt = tier === 'none' ? '无数据' : (tier === 'off' ? '不在线' : (tier === 'busy' ? '繁忙' : (tier === 'chill' ? '放松' : '空闲')));
+    var stt = tier === 'none' ? '无数据' : (tier === 'off' ? '不在线' : (tier === 'busy' ? '繁忙' : (tier === 'chill' ? '轻量' : '空闲')));
     var tfill = tier === 'busy' ? '#2563eb' : (tier === 'chill' ? '#16a34a' : '#69737f');
     bars.push({ x0: x0, x1: x0 + bw, tip: (isCur ? '⏱ 当前时段<br>' : '') + '<b>' + anHMin(t0) + '–' + anHMin(t1) + '</b><br>均 ' + fmtSpeed(av) + ' · 峰 ' + fmtSpeed(pk) + '<br>' + stt });
     var rw = Math.max(bw - 0.4, 0.6).toFixed(2), fw = Math.max(bw, 0.6).toFixed(2);
@@ -1482,7 +1482,7 @@ function anRender(j){
     var st;
     if (!any2) st = '<span class="sub">无</span>';
     else if (mx >= AN_BUSY) st = '<span class="c-busy">繁忙</span>';
-    else if (mx > 0) st = '<span class="c-chill">放松</span>';
+    else if (mx > 0) st = '<span class="c-chill">轻量</span>';
     else st = '<span class="c-idle">空闲</span>';
     var t0 = from + h3 * 3600, t1 = t0 + 3600;
     // 行序即时间先后（由早到晚，索引 0 为窗口起点）
