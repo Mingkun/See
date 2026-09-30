@@ -218,6 +218,7 @@
   #anLivePanel .pt > span:first-child > span:first-child { flex:none; }
   #anLiveDev { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-left:0; }
   #anLiveAge { flex:none; white-space:nowrap; }
+  #anLivePanel .pt { flex-wrap:nowrap; }
   .legend { padding:6px var(--pad-x) 0; font-size:var(--fs-sm); color:var(--muted); }
   #anLeg3 { text-align:center; line-height:1.6; }
   #lvHint { text-align:center; }
@@ -1552,7 +1553,11 @@ function anLiveReset(){
 }
 function anLiveRender(j){
   var dl = document.getElementById('anLiveDev');
-  if (dl) dl.textContent = (j.name || j.ip || j.key || '') + (j.name && j.ip ? ' · ' + j.ip : '');
+  if (dl){
+    var nmFull = (j.name || j.ip || j.key || '');
+    dl.textContent = cutName(nmFull, 12) + (j.name && j.ip ? ' · ' + j.ip : '');   // 顶栏限一行
+    dl.title = nmFull + (j.name && j.ip ? ' · ' + j.ip : '');
+  }
   var ag = document.getElementById('anLiveAge'); if (ag) ag.textContent = anLiveAgeText(j);
   var e1 = document.getElementById('lvDown'), e2 = document.getElementById('lvUp');
   if (e1) e1.textContent = fmtSpeed(j.down);
