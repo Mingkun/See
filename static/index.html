@@ -1276,8 +1276,8 @@ function topoInfoRow(k, v){
 function topoInfo(key){
   var ds = GW.last || [], d = null, i;
   for (i = 0; i < ds.length; i++) if (String(ds[i].key || ds[i].ip) === String(key)) { d = ds[i]; break; }
-  var m = document.getElementById('topoInfoMask'), c = document.getElementById('topoInfoCard');
-  if (!d || !m || !c) return;
+  var c = document.getElementById('topoInfoCard');
+  if (!d || !c) return;
   var meta = devMeta(d);
   var ic = meta.kd ? meta.kd.i : (gwLink(d) === '无线' ? '📱' : '🖥');
   var aps = topoAps(), isAp = false;
@@ -1300,9 +1300,9 @@ function topoInfo(key){
   if (aps.length > 1 && gwLink(d) === '无线' && d.link_raw === 'wired')
     h += '<div class="sub" style="margin-top:10px;color:#0f766e">双击该设备可切换挂在哪台 AP 下</div>';
   c.innerHTML = h;
-  m.style.display = 'flex';
+  c.style.display = 'block';
 }
-function topoInfoClose(){ var m = document.getElementById('topoInfoMask'); if (m) m.style.display = 'none'; }
+function topoInfoClose(){ var c = document.getElementById('topoInfoCard'); if (c) c.style.display = 'none'; }
 function topoAssignAp(key){
   topoInfoClose();
   var ds = GW.last || [], d = null, i;
@@ -1992,9 +1992,7 @@ chartInit();
 checkSession().then(function(){ boot(); });
 </script>
 <div id="chartFsHint">双击任意位置退出全屏</div>
-<div id="topoInfoMask" style="display:none;position:fixed;inset:0;z-index:98;background:rgba(15,23,42,.45);align-items:center;justify-content:center" onclick="topoInfoClose()">
-  <div id="topoInfoCard" style="background:#fff;border-radius:14px;padding:14px 16px;width:min(320px,86vw);box-shadow:0 10px 30px rgba(15,23,42,.25)" onclick="event.stopPropagation()"></div>
-</div>
+<div id="topoInfoCard" style="display:none;position:fixed;left:50%;transform:translateX(-50%);bottom:calc(58px + env(safe-area-inset-bottom));z-index:98;background:#fff;border-radius:14px;padding:12px 14px;width:min(340px,92vw);max-height:46vh;overflow:auto;box-shadow:0 -4px 24px rgba(15,23,42,.22)"></div>
 <div id="chartTip"></div>
 <div id="loginMask" style="display:none;position:fixed;inset:0;z-index:99;background:rgba(15,23,42,.55);align-items:center;justify-content:center">
   <div class="lgbx">
