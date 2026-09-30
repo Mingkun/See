@@ -354,25 +354,65 @@ def _save_ap_ov(ov):
 MERGE_PATH = os.path.join(ROOT, 'data', 'gw-merge.json')
 
 
-def _load_merge():
+def _load_merge_file():
+    """{'split': [不参与同名合并的键], 'merge': {手动指定合并}}；兼容旧格式 {成员:主体}。"""
     try:
         with open(MERGE_PATH, encoding='utf-8') as f:
             j = json.load(f)
-        return {str(k): str(v) for k, v in j.items() if k and v and k != v}
     except Exception:  # noqa: BLE001
-        return {}
+        return {'split': [], 'merge': {}}
+    if isinstance(j, dict) and ('split' in j or 'merge' in j):
+        return {'split': [str(x) for x in (j.get('split') or [])],
+                'merge': {str(a): str(b) for a, b in (j.get('merge') or {}).items() if a and b and a != b}}
+    return {'split': [], 'merge': {str(a): str(b) for a, b in j.items() if a and b and a != b}}
 
 
-def _save_merge(m):
+def _save_merge_file(cfg2):
     os.makedirs(os.path.dirname(MERGE_PATH), exist_ok=True)
     tmp = MERGE_PATH + '.tmp'
     with open(tmp, 'w', encoding='utf-8') as f:
-        json.dump(m, f, ensure_ascii=False)
+        json.dump(cfg2, f, ensure_ascii=False)
     try:
         os.chmod(tmp, 0o600)
     except Exception:  # noqa: BLE001
         pass
     os.replace(tmp, MERGE_PATH)
+    _MERGE_CACHE[0] = 0.0     # 立刻失效重算
+
+
+_MERGE_CACHE = [0.0, {}]
+
+
+def _merge_map():
+    """同名设备缺省合并：同名组里最近活跃的当主体、其余并进去（主网关同一台设备换 IP 后
+    历史不再被拆开）；split 名单里的键除外，merge 里的手动指定最优先。60s 缓存。"""
+    now = time.time()
+    if now - _MERGE_CACHE[0] < 60:
+        return dict(_MERGE_CACHE[1])
+    mf = _load_merge_file()
+    splits = set(mf['split'])
+    m = {}
+    try:
+        keys = store.gw_keys(int(now) - 30 * 86400)
+    except Exception:  # noqa: BLE001
+        keys = []
+    groups = {}
+    for k in keys:
+        nm = (k.get('name') or '').strip()
+        if nm:
+            groups.setdefault(nm, []).append(k)
+    for ks in groups.values():
+        if len(ks) < 2:
+            continue
+        ks = sorted(ks, key=lambda x: -x.get('last_ts', 0))
+        canon = ks[0]['key']
+        for k in ks[1:]:
+            if k['key'] not in splits:
+                m[k['key']] = canon
+    m.update(mf['merge'])
+    _MERGE_CACHE[0] = now
+    _MERGE_CACHE[1] = m
+    return dict(m)
 
 
 def _merge_keys(m, key):
@@ -809,7 +849,7 @@ def api_gw_devices():
         devs = store.gw_latest(now - 900)
     except Exception as e:  # noqa: BLE001
         return jsonify(ok=False, error='读取采样失败：%s' % str(e)[:120]), 500
-    m = _load_merge()
+    m = _merge_map()
     if m:
         by = {}
         for d in devs:
@@ -930,7 +970,7 @@ def api_gw_keys():
     days = int(request.args.get('days', 7))
     now = int(time.time())
     keys = store.gw_keys(now - days * 86400)
-    m = _load_merge()
+    m = _merge_map()
     if m:
         by = {}
         for k in keys:
@@ -950,14 +990,15 @@ def api_gw_keys():
 
 @app.route('/api/gw/merge', methods=['OPTIONS', 'GET'])
 def api_gw_merge():
-    """同名设备分组 + 合并状态（设置页「同名设备合并」用）。"""
+    """同名设备分组 + 缺省合并状态（设置页「同名设备合并」用）。"""
     if request.method == 'OPTIONS':
         return _opt('GET, OPTIONS')
     if _auth_kind() is None:
         return _deny()
     now = int(time.time())
     keys = store.gw_keys(now - 30 * 86400)
-    m = _load_merge()
+    mf = _load_merge_file()
+    splits = set(mf['split'])
     groups = {}
     for k in keys:
         nm = (k.get('name') or '').strip()
@@ -968,24 +1009,19 @@ def api_gw_merge():
         if len(ks) < 2:
             continue
         ks = sorted(ks, key=lambda x: -x.get('last_ts', 0))
-        gkeys = [k['key'] for k in ks]
-        canon = None
-        for kk in gkeys:
-            if any(m.get(x) == kk for x in gkeys):
-                canon = kk
-                break
         items = [{'key': k['key'], 'ip': k.get('ip') or k['key'],
                   'last_ts': int(k.get('last_ts') or 0),
-                  'active': int(k.get('last_ts') or 0) >= now - 1800} for k in ks]
-        out.append({'name': nm, 'items': items,
-                    'merged': any(m.get(x) in gkeys for x in gkeys),
-                    'canonical': canon, 'overlap': sum(1 for i in items if i['active']) > 1})
-    return jsonify(ok=True, groups=out, map=m)
+                  'active': int(k.get('last_ts') or 0) >= now - 1800,
+                  'split': k['key'] in splits} for k in ks]
+        out.append({'name': nm, 'items': items, 'canonical': ks[0]['key'],
+                    'merged': any(not i['split'] for i in items[1:]),
+                    'overlap': sum(1 for i in items if i['active']) > 1})
+    return jsonify(ok=True, groups=out, split=sorted(splits), merge=mf['merge'])
 
 
 @app.route('/api/gw/merge/set', methods=['OPTIONS', 'POST'])
 def api_gw_merge_set():
-    """合并/拆分一组设备（keys 按 last_ts 倒序传入，第一台为合并主体）。"""
+    """同名缺省合并的例外管理：on=false 拆分这组（成员进 split 名单）；on=true 恢复默认合并。"""
     if request.method == 'OPTIONS':
         return _opt('POST, OPTIONS')
     if _auth_kind() is None:
@@ -995,19 +1031,19 @@ def api_gw_merge_set():
     keys = [k for k in dict.fromkeys(keys)]
     if len(keys) < 2:
         return jsonify(ok=False, error='至少要两台设备'), 400
-    m = _load_merge()
+    mf = _load_merge_file()
+    splits = set(mf['split'])
     if data.get('on'):
         for k in keys:
-            m.pop(k, None)
-        for k in keys[1:]:
-            m[k] = keys[0]
+            splits.discard(k)
     else:
-        for k in keys:
-            m.pop(k, None)
-        for x in [x for x, v in list(m.items()) if v in keys]:
-            del m[x]
-    _save_merge(m)
-    return jsonify(ok=True, keys=keys, on=bool(data.get('on')), map=m)
+        for k in keys[1:]:            # 成员进 split 名单（主体不需要）
+            splits.add(k)
+    for k in keys:
+        mf['merge'].pop(k, None)
+    mf['split'] = sorted(splits)
+    _save_merge_file(mf)
+    return jsonify(ok=True, keys=keys, on=bool(data.get('on')), split=mf['split'], merge=mf['merge'])
 
 
 @app.route('/api/gw/series', methods=['OPTIONS', 'GET'])
@@ -1034,7 +1070,7 @@ def api_gw_series():
     has = [0] * n
     name = ''
     ip = ''
-    for r in _merge_rows(_load_merge(), key, frm, end):
+    for r in _merge_rows(_merge_map(), key, frm, end):
         m = (int(r['ts']) - frm) // 60
         if m < 0 or m >= n:
             continue
@@ -1050,7 +1086,7 @@ def api_gw_series():
             speed[i] = speed[i] / cnt[i]
             sup[i] = sup[i] / cnt[i]
             sdn[i] = sdn[i] / cnt[i]
-    mkeys = _merge_keys(_load_merge(), key)
+    mkeys = _merge_keys(_merge_map(), key)
     for k in store.gw_keys(frm):
         if k['key'] in mkeys:
             name = k.get('name') or ''
@@ -1080,7 +1116,7 @@ def api_gw_live():
     secs = max(60, min(secs, 3600))
     now = int(time.time())
     try:
-        rows = _merge_rows(_load_merge(), key, now - secs, now + 1)
+        rows = _merge_rows(_merge_map(), key, now - secs, now + 1)
     except Exception as e:  # noqa: BLE001
         return jsonify(ok=False, error='读取采样失败：%s' % str(e)[:120]), 500
     name = ''

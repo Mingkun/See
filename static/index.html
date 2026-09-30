@@ -399,7 +399,7 @@
     <div id="gwOut" class="sub mt-2"></div>
     </div>
     <div class="sec">同名设备合并</div>
-    <div class="sub ml-0 mt-1">同一台设备换了 IP（DHCP）会变成两条记录、历史流量被拆开；合并后分析页按一台看。两台同名设备<b>同时在线</b>的别合并（那是真的两台）。</div>
+    <div class="sub ml-0 mt-1">同名设备<b>缺省合并</b>：主网关给同一台设备发过不同 IP 的，自动并成一台、历史流量连起来看。确认真是两台不同设备的，点「拆分」。</div>
     <div id="mgBox" class="mt-2"><div class="sub">加载中…</div></div>
     <div class="sec">访问与安全</div>
     <div class="sub ml-0 mt-1">采集器密钥只给家里的微服用（装采集器时填）。别外传，也别贴到聊天里。</div>
@@ -905,15 +905,16 @@ function mgLoad(){
       b.innerHTML = window.__mgGroups.map(function(g, i){
         var rows = g.items.map(function(it){
           return '<div class="sub" style="margin:2px 0 0 10px">· ' + esc(it.ip || it.key) + ' · '
-            + (it.active ? '<span class="c-chill">在线中</span>' : '最后在线 ' + new Date(it.last_ts * 1000).toLocaleString()) + '</div>';
+            + (it.active ? '<span class="c-chill">在线中</span>' : '最后在线 ' + new Date(it.last_ts * 1000).toLocaleString())
+            + (it.split ? ' <span style="color:#c2410c">（已拆分）</span>' : '') + '</div>';
         }).join('');
-        var warn = g.overlap ? '<div class="sub" style="color:#c2410c">⚠ 两台同时在线 —— 可能真是两台设备，慎合并</div>' : '';
+        var warn = g.overlap ? '<div class="sub" style="color:#c2410c">⚠ 两台同时在线 —— 若真是两台设备请点拆分</div>' : '';
         var btn = g.merged
           ? '<button type="button" class="btn ghost" onclick="mgSet(' + i + ',false)">拆分</button>'
-          : '<button type="button" class="btn" onclick="mgSet(' + i + ',true)">合并</button>';
+          : '<button type="button" class="btn" onclick="mgSet(' + i + ',true)">恢复合并</button>';
         return '<div class="mt-2" style="border:1px solid var(--line);border-radius:10px;padding:8px">'
           + '<b>' + esc(g.name) + '</b> ' + btn
-          + (g.merged ? '<span class="sub"> 已合并 → ' + esc(g.canonical || '') + '</span>' : '')
+          + (g.merged ? '<span class="sub"> 已默认合并 → ' + esc(g.canonical || '') + '</span>' : '<span class="sub" style="color:#c2410c"> 已拆分</span>')
           + rows + warn + '</div>';
       }).join('');
     })
