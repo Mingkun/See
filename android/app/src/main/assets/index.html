@@ -495,6 +495,23 @@ function isSelf(x){ var ip = String((x && (x.ip || x.key)) || ''); return !!SELF
 function esc(s){ var d=document.createElement('div'); d.textContent=s==null?'':String(s); return d.innerHTML; }
 function escA(s){ return esc(s).replace(/"/g, '&quot;'); }
 // 设备名称限长：最多 n 个字符（中文按 1 个字算），超出用「…」占位，保证显示宽度不超过 n
+/* 按显示宽度截断（fs-sm 下全角≈12px、半角≈6.5px）：顶栏限一行用，比按字符数准 */
+function cutPx(s, maxPx){
+  s = String(s || '');
+  var w = 0, out = '';
+  for (var i = 0; i < s.length; i++){
+    w += s.charCodeAt(i) > 255 ? 12 : 6.5;
+    if (w > maxPx) return out + '…';
+    out += s[i];
+  }
+  return s;
+}
+/* 名字+IP/窗口 整串若装不下 → 只显示名字（不截半个 IP） */
+function cutTitle(name, tail, maxPx){
+  var full = name + (tail ? ' · ' + tail : '');
+  if (cutPx(full, maxPx).slice(-1) !== '…') return full;
+  return cutPx(name, maxPx);
+}
 function cutName(s, n){ s = (s == null ? '' : String(s)); if (!s) return ''; return s.length > n ? s.slice(0, n - 1) + '\u2026' : s; }
 function fmtSpeed(b){ if(!b||b<1) return '0'; if(b<1024) return b.toFixed(0)+' B/s'; if(b<1048576) return (b/1024).toFixed(1)+' K/s'; return (b/1048576).toFixed(2)+' M/s'; }
 function fmtBytes(b){ if(!b) return '0'; if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(1)+' KB'; if(b<1073741824) return (b/1048576).toFixed(1)+' MB'; return (b/1073741824).toFixed(2)+' GB'; }
@@ -1556,7 +1573,7 @@ function anLiveRender(j){
   var dl = document.getElementById('anLiveDev');
   if (dl){
     var nmFull = (j.name || j.ip || j.key || '');
-    dl.textContent = cutName(nmFull, 12) + (j.name && j.ip ? ' · ' + j.ip : '');   // 顶栏限一行
+    dl.textContent = cutTitle(nmFull, (j.name && j.ip ? j.ip : ''), 170);   // 顶栏限一行（按宽度）
     dl.title = nmFull + (j.name && j.ip ? ' · ' + j.ip : '');
   }
   var ag = document.getElementById('anLiveAge'); if (ag) ag.textContent = anLiveAgeText(j);
@@ -1796,7 +1813,7 @@ function anRender(j){
   var anSubEl = document.getElementById('anSub');
   if (anSubEl){
     var nmSub = (j.name || j.ip || AN.key) + ' · ' + anFmtDur(n) + '窗口';
-    anSubEl.textContent = cutName(j.name || j.ip || AN.key, 12) + ' · ' + anFmtDur(n) + '窗口';   // 顶栏限一行
+    anSubEl.textContent = cutTitle(j.name || j.ip || AN.key, anFmtDur(n) + '窗口', 165);   // 顶栏限一行（按宽度）
     anSubEl.title = nmSub;
   }
   document.getElementById('anDurBusy').textContent = anDur2(durMin.busy);
