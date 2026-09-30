@@ -1609,8 +1609,7 @@ function anRender(j){
   for (var si = 0; si < STEPS.length; si++){ step = STEPS[si]; if (HRS / step <= 6) break; }
   if (svg.classList.contains('chart-fs')) step = Math.min(step, 2);   // 全屏：横轴刻度加密到每 2 小时（24h 窗口 4h→2h）
   var maxV = 1; for (var i = 0; i < n; i++) if (sp[i] > maxV) maxV = sp[i];
-  var lg = Math.log10(1 + maxV);
-  function yv(v){ var t = Math.log10(1 + v) / lg; if (t < 0) t = 0; if (t > 1) t = 1; return padT + ih - t * ih; }
+  function yv(v){ var t = v / maxV; if (t < 0) t = 0; if (t > 1) t = 1; return padT + ih - t * ih; }   // 线性刻度（试用：原为对数）
   var p = [];
   for (var hh = 0; hh <= HRS; hh += step){
     var x = padL + (hh / HRS) * iw;
