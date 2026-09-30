@@ -1513,7 +1513,7 @@ function anInit(){
     .then(function(){ anWinLabel(); anKeys(); });
 }
 function anKeys(){
-  apiFetch(API + '/gw/keys?days=7')
+  apiFetch(API + '/gw/keys?days=2')   // 只列最近 48 小时活跃的设备（旧的不再返回，下拉不再堆积僵尸）
     .then(function(r){ return r.json(); })
     .then(function(j){
       var lab = document.getElementById('anDevLab');
