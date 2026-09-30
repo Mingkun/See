@@ -1934,14 +1934,14 @@ function chartPlaceTip(svg, hb, tip){
   var cx = r.left + ((hb.x0 + hb.x1) / 2) * sc;
   var tw = tip.offsetWidth, th = tip.offsetHeight;
   var M = 6, px = cx - tw / 2, py = r.top + 10;
-  // 详情卡片不能盖住被选中的柱子：依次试「柱顶上方 → 柱底下方 → 柱子右侧 → 柱子左侧」，
-  // 每个候选先夹回视口，夹完还压着柱子就换下一个；四个都不行才退回默认位置（贴图顶）。
+  // 详情卡片不能盖住被选中的柱子：优先「右侧 → 左侧」（x 轴方向完全不与选中柱同列，
+  // 也避免压到下方的时间刻度），两侧都放不下再试上下；四个都不行才退回默认位置（贴图顶）。
   if (hb.yT != null){
     var bx0 = r.left + hb.x0 * sc, bx1 = r.left + hb.x1 * sc;
     var byT = r.top + hb.yT * scy, byB = r.top + hb.yB * scy;
     var cw = window.innerWidth, chh = window.innerHeight;
     var cyAt = Math.max(M, Math.min((byT + byB) / 2 - th / 2, chh - M - th));
-    var cand = [[cx - tw / 2, byT - th - M], [cx - tw / 2, byB + M], [bx1 + M + 2, cyAt], [bx0 - M - 2 - tw, cyAt]];
+    var cand = [[bx1 + M + 2, cyAt], [bx0 - M - 2 - tw, cyAt], [cx - tw / 2, byT - th - M], [cx - tw / 2, byB + M]];
     for (var ci = 0; ci < cand.length; ci++){
       var qx = cand[ci][0], qy = cand[ci][1];
       if (qx < M) qx = M;
