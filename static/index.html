@@ -1273,7 +1273,13 @@ function topoInfoRow(k, v){
     + '<span style="color:#69737f">' + k + '</span>'
     + '<span style="text-align:right;color:#0f172a;font-weight:500">' + v + '</span></div>';
 }
+var topoInfoTimer = null;
+/* 单击先等 260ms：期间来了第二击（双击切换归属）就不弹框 —— 否则框先弹出会挡住第二下 */
 function topoInfo(key){
+  if (topoInfoTimer){ clearTimeout(topoInfoTimer); topoInfoTimer = null; }
+  topoInfoTimer = setTimeout(function(){ topoInfoTimer = null; topoInfoShow(key); }, 260);
+}
+function topoInfoShow(key){
   var ds = GW.last || [], d = null, i;
   for (i = 0; i < ds.length; i++) if (String(ds[i].key || ds[i].ip) === String(key)) { d = ds[i]; break; }
   var c = document.getElementById('topoInfoCard');
@@ -1302,7 +1308,10 @@ function topoInfo(key){
   c.innerHTML = h;
   c.style.display = 'block';
 }
-function topoInfoClose(){ var c = document.getElementById('topoInfoCard'); if (c) c.style.display = 'none'; }
+function topoInfoClose(){
+  if (topoInfoTimer){ clearTimeout(topoInfoTimer); topoInfoTimer = null; }
+  var c = document.getElementById('topoInfoCard'); if (c) c.style.display = 'none';
+}
 function topoAssignAp(key){
   topoInfoClose();
   var ds = GW.last || [], d = null, i;
