@@ -1585,7 +1585,7 @@ function anLoad(){
     .then(function(j){ if (!j || !j.ok) { document.getElementById('anSub').textContent = '❌ ' + ((j && j.error) || '失败'); return; } anRender(j); anLiveLoad(); })
     .catch(function(){ document.getElementById('anSub').textContent = '服务器连接失败'; });
 }
-var AN_BUSY = 1048576;    // 「繁忙」阈值 = 合计（上行+下行）峰值 ≥ 1 M/s；柱色、虚线、分时用量状态共用这一个值
+var AN_BUSY = 204800;     // 「繁忙」阈值 = 合计（上行+下行）峰值 ≥ 200 K/s（200×1024）；柱色、虚线、分时用量状态共用这一个值
 function anDayLbl(sec){ var d = new Date(sec * 1000); return (d.getMonth() + 1) + '-' + d.getDate(); }
 function anHMin(sec){ var d = new Date(sec * 1000); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
 function anDur2(min){ var h = Math.floor(min / 60), m = min % 60; return h + 'H' + (m < 10 ? '0' : '') + m + 'M'; }
@@ -1657,7 +1657,7 @@ function anRender(j){
     }
     else p.push('<rect x="' + x0.toFixed(2) + '" y="' + (padT + ih - 2) + '" width="' + rw + '" height="2" fill="' + tfill + '"' + curCls + '/>');
   }
-  // 合计（上行+下行）峰值参考线：1 M/s（浅黄虚线）。位置与柱色的分档阈值同源（都用 PKTH），
+  // 合计（上行+下行）峰值参考线：200 K/s（浅黄虚线）。位置与柱色的分档阈值同源（都用 PKTH），
   // 且取在总量程上，所以线代表的就是「合计峰值」本身，不只是标签这么写。
   // 只在量程装得下时画：yv() 对超过量程的值会贴顶 clamp，全窗口都不到阈值时硬画会停住骗人。
   if (maxV >= PKTH){
@@ -1669,7 +1669,7 @@ function anRender(j){
   svg.innerHTML = p.join('');
   chartTipSync(svg);
   // 「轻量 + 空闲」时段：与「分时用量」完全同一套口径 —— 5 分钟一格、按该格峰值
-  // 分档（空闲=整格零流量、轻量=有流量但峰值 <1M/s），连续 ≥10 分钟（2 格）才算。
+  // 分档（空闲=整格零流量、轻量=有流量但峰值 <AN_BUSY），连续 ≥10 分钟（2 格）才算。
   // 老逻辑按「分钟均速 <4KB/s」切，跟峰值口径对不上，已废弃（AN_THR 一并删除）。
   var runs = [];
   var i2 = 0;
