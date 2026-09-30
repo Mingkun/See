@@ -403,6 +403,9 @@
     <div class="sec">同名设备合并</div>
     <div class="sub ml-0 mt-1">同名设备<b>缺省合并</b>：主网关给同一台设备发过不同 IP 的，自动并成一台、历史流量连起来看。确认真是两台不同设备的，点「拆分」。</div>
     <div id="mgBox" class="mt-2"><div class="sub">加载中…</div></div>
+    <div class="sec">设备改名</div>
+    <div class="sub ml-0 mt-1">网关识别的名字太泛（如"电脑"）或为空的，在这里改；设备列表/拓扑/分析页全生效，支持中文。留空保存 = 恢复网关名。</div>
+    <div id="nmBox" class="mt-2">加载中…</div>
     <div class="sec">访问与安全</div>
     <div class="sub ml-0 mt-1">采集器密钥只给家里的微服用（装采集器时填）。别外传，也别贴到聊天里。</div>
     <div class="row mt-2">
@@ -910,6 +913,42 @@ function gwBoot(){
   // app 不再是采集端：监控页数据一律读服务器（微服采集器上报的那份），所以常驻刷新
   gwShow(); gwTick(); if (!GW.timer) GW.timer = setInterval(gwTick, 5000);
   mgLoad();
+  nmLoad();
+}
+/* 设备改名：覆盖网关给的名字（全页面生效）；改名后同名合并按新名字重新分组 */
+function nmLoad(){
+  var devs = [], ov = {};
+  apiFetch(API + '/gw/keys?days=2', {})
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      devs = (j && j.keys) || [];
+      return apiFetch(API + '/gw/name', {}).then(function(r2){ return r2.json(); });
+    })
+    .then(function(j2){
+      ov = (j2 && j2.map) || {};
+      var b = document.getElementById('nmBox');
+      if (!b) return;
+      if (!devs.length){ b.innerHTML = '<div class="sub">暂无活跃设备</div>'; return; }
+      b.innerHTML = devs.map(function(d, i){
+        var cur = ov[d.key] || '';
+        return '<div class="row" style="margin-top:6px;gap:6px;align-items:center">'
+          + '<span class="sub" style="flex:none;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc((d.name || '') + (d.name_fixed ? '（已改）' : '')) + '</span>'
+          + '<span class="sub" style="flex:none">' + esc(d.ip || d.key) + '</span>'
+          + '<input id="nmIn' + i + '" class="inp" style="flex:1;min-width:0" maxlength="24" placeholder="' + escA(d.name || '起个名字') + '" value="' + escA(cur) + '">'
+          + '<button type="button" class="btn sm" onclick="nmSet(' + i + ',\'' + escA(String(d.key)) + '\')">保存</button>'
+          + '</div>';
+      }).join('');
+    })
+    .catch(function(){ var b = document.getElementById('nmBox'); if (b) b.innerHTML = '<div class="sub">读取失败</div>'; });
+}
+function nmSet(i, key){
+  var inp = document.getElementById('nmIn' + i);
+  var name = inp ? inp.value.trim().slice(0, 24) : '';
+  apiFetch(API + '/gw/name/set', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key: key, name: name }) })
+    .then(function(r){ return r.json(); })
+    .then(function(j){ if (j && j.ok) nmLoad(); else alert((j && j.error) || '保存失败'); })
+    .catch(function(){ alert('网络失败'); });
 }
 /* 同名设备合并：同一台设备换 IP 后历史被拆开，这里把成员键并到主体键（分析/监控全口径生效） */
 function mgLoad(){

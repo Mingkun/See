@@ -397,8 +397,9 @@ def _merge_map():
     except Exception:  # noqa: BLE001
         keys = []
     groups = {}
+    nm_ov = _load_names()
     for k in keys:
-        nm = (k.get('name') or '').strip()
+        nm = (nm_ov.get(k['key']) or k.get('name') or '').strip()
         if nm:
             groups.setdefault(nm, []).append(k)
     for ks in groups.values():
@@ -446,6 +447,32 @@ def _merge_rows(m, key, frm, to):
             continue
         out.append(r)
     return out
+
+
+NAME_OV_PATH = os.path.join(ROOT, 'data', 'gw-names.json')
+
+
+def _load_names():
+    # 手动改的设备显示名（覆盖网关返回的名字）
+    try:
+        with open(NAME_OV_PATH, encoding='utf-8') as f:
+            j = json.load(f)
+        return {str(a): str(b)[:24] for a, b in j.items() if a and b}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _save_names(m):
+    os.makedirs(os.path.dirname(NAME_OV_PATH), exist_ok=True)
+    tmp = NAME_OV_PATH + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(m, f, ensure_ascii=False)
+    try:
+        os.chmod(tmp, 0o600)
+    except Exception:  # noqa: BLE001
+        pass
+    os.replace(tmp, NAME_OV_PATH)
+    _MERGE_CACHE[0] = 0.0     # 改名影响同名分组，立即重算
 
 
 OFF_MAX_MIN = 1440          # 「暂停 N 分钟」上限（24 小时）
@@ -859,6 +886,11 @@ def api_gw_devices():
             if o is None or d['ts'] > o['ts']:
                 by[kk] = d
         devs = sorted(by.values(), key=lambda d: -d['ts'])
+    nm_ov = _load_names()
+    if nm_ov:
+        for d in devs:
+            if d.get('key') in nm_ov:
+                d['name'] = nm_ov[d['key']]
     try:
         links = store.gw_last_link()
     except Exception:  # noqa: BLE001
@@ -933,6 +965,37 @@ def api_gw_ap():
     return jsonify(ok=True, key=key, ap=ap)
 
 
+@app.route('/api/gw/name', methods=['OPTIONS', 'GET'])
+def api_gw_name():
+    # 手动改的设备名表
+    if request.method == 'OPTIONS':
+        return _opt('GET, OPTIONS')
+    if _auth_kind() is None:
+        return _deny()
+    return jsonify(ok=True, map=_load_names())
+
+
+@app.route('/api/gw/name/set', methods=['OPTIONS', 'POST'])
+def api_gw_name_set():
+    # 手动改设备显示名（name 为空 = 恢复网关名）；改名会让同名合并按新名字重新分组
+    if request.method == 'OPTIONS':
+        return _opt('POST, OPTIONS')
+    if _auth_kind() is None:
+        return _deny()
+    data = request.get_json(force=True, silent=True) or {}
+    key = str(data.get('key') or '').strip()[:64]
+    name = str(data.get('name') or '').strip()[:24]
+    if not key:
+        return jsonify(ok=False, error='缺少设备标识'), 400
+    m = _load_names()
+    if name:
+        m[key] = name
+    else:
+        m.pop(key, None)
+    _save_names(m)
+    return jsonify(ok=True, key=key, name=name)
+
+
 @app.route('/api/gw/cred', methods=['OPTIONS', 'GET'])
 def api_gw_cred():
     """采集器专用：取网关登录凭据（含明文密码）。仅机器密钥可用。"""
@@ -985,6 +1048,12 @@ def api_gw_keys():
                 if not o.get('name') and k.get('name'):
                     o['name'] = k['name']
         keys = sorted(by.values(), key=lambda x: -x.get('last_ts', 0))
+    nm_ov = _load_names()
+    if nm_ov:
+        for k in keys:
+            if k.get('key') in nm_ov:
+                k['name'] = nm_ov[k['key']]
+                k['name_fixed'] = 1
     return jsonify(ok=True, now=now, keys=keys)
 
 
@@ -1000,8 +1069,9 @@ def api_gw_merge():
     mf = _load_merge_file()
     splits = set(mf['split'])
     groups = {}
+    nm_ov = _load_names()
     for k in keys:
-        nm = (k.get('name') or '').strip()
+        nm = (nm_ov.get(k['key']) or k.get('name') or '').strip()
         if nm:
             groups.setdefault(nm, []).append(k)
     out = []
@@ -1091,6 +1161,7 @@ def api_gw_series():
         if k['key'] in mkeys:
             name = k.get('name') or ''
             ip = k.get('ip') or ''
+    name = _load_names().get(key, name)
     return jsonify(ok=True, key=key, name=name, ip=ip, frm=frm, now=now, end=end, minutes=n,
                    speed=speed, up=sup, down=sdn, present=pres, has=has)
 
@@ -1129,6 +1200,7 @@ def api_gw_live():
                 break
     except Exception:  # noqa: BLE001
         pass
+    name = _load_names().get(key, name)
     try:
         link = store.gw_last_link().get(key, '')
     except Exception:  # noqa: BLE001
