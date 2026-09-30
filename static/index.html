@@ -1198,8 +1198,11 @@ function topoPaint(){
     if (list.length) s.push('<path d="M' + colC[i] + ' 52 V' + (TOP + (list.length - 1) * ROW + 16) + '" stroke="#cbd5e1" stroke-width="1.2" fill="none"/>');
     s.push('<text x="' + colC[i] + '" y="68" text-anchor="middle" font-size="9.5" fill="' + (wired ? '#69737f' : '#0f766e')
       + '" stroke="#fff" stroke-width="3" paint-order="stroke">' + (wired ? '🔌 有线 ' + nrAll : '📶 无线 ' + wf.length) + '</text>');
-    for (var j = 0; j < list.length; j++)
-      s.push(topoNode(colX[i], TOP + j * ROW, list[j], wired, wired && j >= wr.length ? j - wr.length : null));
+    for (var j = 0; j < list.length; j++){
+      var nd3 = topoNode(colX[i], TOP + j * ROW, list[j], wired, wired && j >= wr.length ? j - wr.length : null);
+      var k3 = escA(String(list[j].key || list[j].ip || ''));
+      s.push('<g style="cursor:pointer" onclick="topoInfo(\'' + k3 + '\')">' + nd3 + '</g>');
+    }
   }
   var H = TOP + rows * ROW;
   if (aps.length && wa.length){
@@ -1235,8 +1238,10 @@ function topoPaint(){
       var arws2 = Math.ceil(bd.list.length / 2);
       for (i2 = 0; i2 < bd.list.length; i2++){
         var nd2 = topoNode(colX[i2 % 2], y2 + 12 + Math.floor(i2 / 2) * ROW, bd.list[i2], false);
-        if (aps.length > 1)
-          nd2 = '<g style="cursor:pointer" onclick="topoAssignAp(\'' + escA(String(bd.list[i2].key || bd.list[i2].ip || '')) + '\')">' + nd2 + '</g>';
+        var k2b = escA(String(bd.list[i2].key || bd.list[i2].ip || ''));
+        nd2 = '<g style="cursor:pointer" onclick="topoInfo(\'' + k2b + '\')"'
+            + (aps.length > 1 ? ' ondblclick="topoAssignAp(\'' + k2b + '\')"' : '')
+            + '>' + nd2 + '</g>';
         s.push(nd2);
       }
       y2 += 12 + arws2 * ROW + 12;
@@ -1262,7 +1267,44 @@ function topoApName(k){
   return String(k);
 }
 function topoHint(t){ var h = document.getElementById('topoHint'); if (h) h.textContent = t; }
+/* 单击拓扑任意设备：弹框看详细信息；AP 下挂设备改为双击才切换归属 */
+function topoInfoRow(k, v){
+  return '<div style="display:flex;justify-content:space-between;gap:16px;margin-top:7px;font-size:13px">'
+    + '<span style="color:#69737f">' + k + '</span>'
+    + '<span style="text-align:right;color:#0f172a;font-weight:500">' + v + '</span></div>';
+}
+function topoInfo(key){
+  var ds = GW.last || [], d = null, i;
+  for (i = 0; i < ds.length; i++) if (String(ds[i].key || ds[i].ip) === String(key)) { d = ds[i]; break; }
+  var m = document.getElementById('topoInfoMask'), c = document.getElementById('topoInfoCard');
+  if (!d || !m || !c) return;
+  var meta = devMeta(d);
+  var ic = meta.kd ? meta.kd.i : (gwLink(d) === '无线' ? '📱' : '🖥');
+  var aps = topoAps(), isAp = false;
+  for (i = 0; i < aps.length; i++) if (String(aps[i].key) === String(d.key)) isAp = true;
+  var linkTxt = gwLink(d) + (d.link_fixed ? '（手动）' : '');
+  if (d.link_raw === 'wired' && gwLink(d) === '无线') linkTxt += ' · 网关口径：有线';
+  var apTxt = '';
+  if (d.ap) apTxt = topoApName(d.ap);
+  else if (gwLink(d) === '无线' && d.link_raw === 'wired' && aps.length > 1) apTxt = '未指定（双击切换）';
+  var h = '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px">'
+    + '<div style="font-size:15px;font-weight:650">' + ic + ' ' + esc(cutName(d.name || d.ip || d.key, 16)) + '</div>'
+    + '<button type="button" onclick="topoInfoClose()" style="border:none;background:none;font-size:17px;color:#94a3b8;cursor:pointer;padding:0 2px;line-height:1">✕</button></div>'
+    + '<div class="sub" style="margin-top:2px">' + esc(d.ip || d.key) + (isAp ? ' · AP' : '') + '</div>';
+  if (meta.kd && meta.kd.l) h += topoInfoRow('类型', esc(meta.kd.l));
+  h += topoInfoRow('接入方式', esc(linkTxt));
+  if (apTxt) h += topoInfoRow('归属 AP', esc(apTxt));
+  h += topoInfoRow('当前速率', '↓' + fmtSpeed(d.down) + ' ↑' + fmtSpeed(d.up));
+  h += topoInfoRow('在线时长', esc(gwDur(d.online_time || 0)));
+  if (d.ts) h += topoInfoRow('最后采样', esc(new Date(d.ts * 1000).toLocaleTimeString()));
+  if (aps.length > 1 && gwLink(d) === '无线' && d.link_raw === 'wired')
+    h += '<div class="sub" style="margin-top:10px;color:#0f766e">双击该设备可切换挂在哪台 AP 下</div>';
+  c.innerHTML = h;
+  m.style.display = 'flex';
+}
+function topoInfoClose(){ var m = document.getElementById('topoInfoMask'); if (m) m.style.display = 'none'; }
 function topoAssignAp(key){
+  topoInfoClose();
   var ds = GW.last || [], d = null, i;
   for (i = 0; i < ds.length; i++) if (String(ds[i].key || ds[i].ip) === String(key)) { d = ds[i]; break; }
   if (!d || topoAps().length < 2) return;
@@ -1950,6 +1992,9 @@ chartInit();
 checkSession().then(function(){ boot(); });
 </script>
 <div id="chartFsHint">双击任意位置退出全屏</div>
+<div id="topoInfoMask" style="display:none;position:fixed;inset:0;z-index:98;background:rgba(15,23,42,.45);align-items:center;justify-content:center" onclick="topoInfoClose()">
+  <div id="topoInfoCard" style="background:#fff;border-radius:14px;padding:14px 16px;width:min(320px,86vw);box-shadow:0 10px 30px rgba(15,23,42,.25)" onclick="event.stopPropagation()"></div>
+</div>
 <div id="chartTip"></div>
 <div id="loginMask" style="display:none;position:fixed;inset:0;z-index:99;background:rgba(15,23,42,.55);align-items:center;justify-content:center">
   <div class="lgbx">
