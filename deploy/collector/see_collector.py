@@ -316,8 +316,126 @@ class Collector(object):
             pass
         return out
 
+    # ---------- SSDP/UPnP：设备自述（friendlyName / manufacturer / model） ----------
+    def ssdp_scan(self, timeout=3.0):
+        """M-SEARCH 组播 → 收 LOCATION → 取 XML → {ip: (friendlyName, manufacturer, modelName)}。"""
+        import socket as sk
+        msg = ('M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\n'
+               'MAN: "ssdp:discover"\r\nMX: 2\r\nST: ssdp:all\r\n\r\n').encode()
+        s2 = sk.socket(sk.AF_INET, sk.SOCK_DGRAM)
+        s2.settimeout(0.5)
+        s2.setsockopt(sk.IPPROTO_IP, sk.IP_MULTICAST_TTL, 2)
+        loc = {}
+        try:
+            s2.sendto(msg, ('239.255.255.250', 1900))
+            end = time.time() + timeout
+            while time.time() < end:
+                try:
+                    data, addr = s2.recvfrom(4096)
+                except sk.timeout:
+                    continue
+                for line in data.decode('utf-8', 'ignore').splitlines():
+                    if line.upper().startswith('LOCATION:'):
+                        loc[addr[0]] = line.split(':', 1)[1].strip()
+                        break
+        except Exception:  # noqa: BLE001
+            pass
+        finally:
+            s2.close()
+        out = {}
+        for ip, url in list(loc.items())[:20]:
+            try:
+                st2, xml = self.http.get(url, {'User-Agent': UA})
+                fn = re.search(r'<friendlyName>(.*?)</friendlyName>', xml or '', re.S)
+                mf = re.search(r'<manufacturer>(.*?)</manufacturer>', xml or '', re.S)
+                md = re.search(r'<modelName>(.*?)</modelName>', xml or '', re.S)
+                out[ip] = (fn.group(1).strip() if fn else '',
+                           mf.group(1).strip() if mf else '',
+                           md.group(1).strip() if md else '')
+            except Exception:  # noqa: BLE001
+                pass
+        return out
+
+    # ---------- mDNS：服务发现（Apple/Chromecast/打印机等广播自己的服务） ----------
+    def mdns_scan(self, timeout=3.0):
+        """DNS-SD PTR 查询 → 从应答里抓 _xxx._tcp/_udp 服务名 → {ip: ['_airplay._tcp', ...]}。"""
+        import socket as sk
+        q = (b'\x00\x00\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00'
+             b'\x09_services\x07_dns-sd\x04_udp\x05local\x00\x00\x0c\x00\x01')
+        s2 = sk.socket(sk.AF_INET, sk.SOCK_DGRAM)
+        s2.settimeout(0.5)
+        svc = {}
+        try:
+            s2.sendto(q, ('224.0.0.251', 5353))
+            end = time.time() + timeout
+            while time.time() < end:
+                try:
+                    data, addr = s2.recvfrom(4096)
+                except sk.timeout:
+                    continue
+                names = re.findall(rb'[_a-zA-Z0-9-]{2,32}\._[a-zA-Z0-9-]{2,16}\._(?:tcp|udp)', data)
+                if names:
+                    svc.setdefault(addr[0], set()).update(n.decode('ascii', 'ignore').split('._')[0] + '·' for n in ())
+                    for n in names:
+                        nm = n.decode('ascii', 'ignore')
+                        svc.setdefault(addr[0], set()).add(nm)
+        except Exception:  # noqa: BLE001
+            pass
+        finally:
+            s2.close()
+        return {ip: sorted(v)[:3] for ip, v in svc.items()}
+
+    # ---------- TCP 指纹：读端口 banner（HTTP Server 头 / RTSP 等） ----------
+    def banner_scan(self, ips, timeout=0.8):
+        """并发探 80/554/9100，读首段字节提取指纹 → {ip: 'Server: xxx' 或 'RTSP'}。"""
+        import concurrent.futures
+        import socket as sk
+        ports = (80, 554, 9100)
+
+        def probe(ip):
+            for port in ports:
+                try:
+                    c = sk.create_connection((ip, port), timeout=timeout)
+                    c.sendall(b'GET / HTTP/1.0\r\n\r\n' if port == 80 else b'OPTIONS * RTSP/1.0\r\n\r\n')
+                    c.settimeout(timeout)
+                    buf = c.recv(256)
+                    c.close()
+                    txt = buf.decode('utf-8', 'ignore')
+                    m = re.search(r'Server:\s*(.{2,40})', txt, re.I)
+                    if m:
+                        return m.group(1).strip()
+                    if 'RTSP' in txt:
+                        return 'RTSP设备'
+                except Exception:  # noqa: BLE001
+                    pass
+            return ''
+
+        out = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=24) as ex:
+            for ip, banner in zip(ips, ex.map(probe, ips)):
+                if banner:
+                    out[ip] = banner
+        return out
+
     def report_obs(self):
         devs = self.lan_scan()
+        ssdp = self.ssdp_scan()
+        mdns = self.mdns_scan()
+        banners = self.banner_scan([d['ip'] for d in devs if d.get('mac')][:40])
+        for d in devs:
+            ip = d['ip']
+            if ip in ssdp:
+                fn, mf, md = ssdp[ip]
+                if mf and not d.get('vendor'):
+                    d['vendor'] = mf[:24]
+                if fn and not d.get('hostname'):
+                    d['hostname'] = fn[:24]
+                if md and not d.get('type'):
+                    d['type'] = md[:24]
+            if ip in mdns and not d.get('type'):
+                d['type'] = '·'.join(mdns[ip])[:24]
+            if ip in banners and not d.get('type'):
+                d['type'] = banners[ip]
         body = json.dumps({'devices': devs}, ensure_ascii=False).encode()
         try:
             st, txt = self.http.post(self.api + '/api/obs/report', body,

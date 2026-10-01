@@ -133,7 +133,7 @@ class Scanner(threading.Thread):
                     hostname = str(r.get('hostname') or '')
                     vendor = str(r.get('vendor') or '')
                     st = {'ip': ip, 'hostname': hostname, 'vendor': vendor,
-                          'last_seen': now, 'online': True}
+                          'type': str(r.get('type') or ''), 'last_seen': now, 'online': True}
                     self.seen[mac] = st
                     self.store.upsert_device(mac, ip, hostname or None, vendor or None, int(now))
                     if mac not in self.known_macs:
@@ -146,6 +146,8 @@ class Scanner(threading.Thread):
                         st['hostname'] = str(r['hostname'])
                     if r.get('vendor'):
                         st['vendor'] = str(r['vendor'])
+                    if r.get('type'):
+                        st['type'] = str(r['type'])
                     st['last_seen'] = now
                     st['online'] = True
                     self.store.upsert_device(mac, ip, st['hostname'] or None, st['vendor'] or None, int(now))
@@ -198,8 +200,8 @@ class Scanner(threading.Thread):
             out = []
             for mac, st in self.seen.items():
                 out.append({'mac': mac, 'ip': st['ip'], 'hostname': st['hostname'],
-                            'vendor': st['vendor'], 'online': st['online'],
-                            'last_seen': st['last_seen']})
+                            'vendor': st['vendor'], 'type': st.get('type', ''),
+                            'online': st['online'], 'last_seen': st['last_seen']})
             return out
 
     def local_ips(self):

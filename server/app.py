@@ -491,10 +491,75 @@ def _load_oui():
         _OUI_DB = {}
 
 
+VENDOR_CACHE_PATH = os.path.join(ROOT, 'data', 'vendor-cache.json')
+_VENDOR_CACHE = {}
+_VENDOR_QUEUE = []          # 待查 macvendors 的前缀（限速 1.2s/次）
+
+
+def _load_vendor_cache():
+    global _VENDOR_CACHE
+    try:
+        with open(VENDOR_CACHE_PATH, encoding='utf-8') as f:
+            _VENDOR_CACHE = json.load(f)
+    except Exception:  # noqa: BLE001
+        _VENDOR_CACHE = {}
+
+
+def _save_vendor_cache():
+    try:
+        tmp = VENDOR_CACHE_PATH + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(_VENDOR_CACHE, f, ensure_ascii=False)
+        os.replace(tmp, VENDOR_CACHE_PATH)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _vendor_fetch_loop():
+    """后台线程：macvendors.com 兜底（限速 1.2s/次，结果持久缓存）。"""
+    import urllib.request
+    while True:
+        try:
+            if _VENDOR_QUEUE:
+                mac6 = _VENDOR_QUEUE.pop(0)
+                if mac6 not in _VENDOR_CACHE:
+                    try:
+                        req = urllib.request.Request('https://api.macvendors.com/' + mac6,
+                                                     headers={'User-Agent': 'see-monitor/1.0'})
+                        with urllib.request.urlopen(req, timeout=5) as r:
+                            v = r.read().decode('utf-8', 'ignore').strip()[:28]
+                        if v and 'errors' not in v[:40].lower() and v != 'Not Found':
+                            _VENDOR_CACHE[mac6] = v
+                            _save_vendor_cache()
+                    except Exception:  # noqa: BLE001
+                        pass
+                time.sleep(1.2)
+            else:
+                time.sleep(10)
+        except Exception:  # noqa: BLE001
+            time.sleep(5)
+
+
 def _vendor_of(mac):
+    """24/28/36 位前缀依次查（58k 条 IEEE 库）→ 本地缓存 → 排队 macvendors 兜底。"""
+    h = str(mac or '').replace(':', '').upper()
+    if not h or len(h) < 6:
+        return ''
     if not _OUI_DB:
         _load_oui()
-    return _OUI_DB.get(str(mac or '').replace(':', '').upper()[:6], '')
+    for ln in (6, 7, 9):
+        v = _OUI_DB.get(h[:ln])
+        if v:
+            return v
+    if h[:6] in _VENDOR_CACHE:
+        return _VENDOR_CACHE[h[:6]]
+    if h[:6] not in _VENDOR_QUEUE and len(_VENDOR_QUEUE) < 64:
+        _VENDOR_QUEUE.append(h[:6])
+    return ''
+
+
+import threading as _threading
+threading.Thread(target=_vendor_fetch_loop, daemon=True).start()
 
 
 OFF_MAX_MIN = 1440          # 「暂停 N 分钟」上限（24 小时）
