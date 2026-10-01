@@ -483,6 +483,21 @@ var JS_OUI = { '246F28': '乐鑫Espressif', '30AEA4': '乐鑫Espressif', '5CCF7F
   '640980': '小米', '7811DC': '小米', 'ACC1EE': '小米', '508F4C': '小米', 'F8A45F': '小米',
   'ECA62F': '华为' };
 function jsVendor(mac){ return JS_OUI[String(mac || '').replace(/:/g, '').slice(0, 6).toUpperCase()] || ''; }
+/* 本机模式下：云端 58k OUI 批量补齐本地扫到的 MAC 厂商（一次缓存，后续免查） */
+var OUI_CACHE = {};
+function obsVendor(mac){ return OUI_CACHE[String(mac || '').toUpperCase()] || jsVendor(mac); }
+function obsVendorEnrich(devs){
+  var need = devs.filter(function(v){ return v.mac && !v.vendor && !jsVendor(v.mac); })
+                 .map(function(v){ return v.mac; });
+  if (!need.length) return Promise.resolve();
+  return apiFetch(API + '/vendor?macs=' + encodeURIComponent(need.slice(0, 64).join(',')), {})
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      if (j && j.ok && j.vendors){
+        for (var k in j.vendors) OUI_CACHE[k] = j.vendors[k];
+      }
+    }).catch(function(){});
+}
 function obsFetch(path, opts){
   return OBS_SRC === 'collector' ? apiFetch(API + path, opts) : fetch('api' + path, opts);
 }
@@ -599,6 +614,8 @@ function loadStatus(){
 function loadDevices(){
   obsFetch('/devices').then(function(r){return r.json()}).then(function(d){
     if(!d||!d.ok) return;
+    var enrich = (OBS_SRC === 'local' && d.devices && d.devices.length) ? obsVendorEnrich(d.devices) : Promise.resolve();
+    return enrich.then(function(){
     var b=document.getElementById('devBody');
     if(!d.devices.length){ b.innerHTML='<tr><td colspan="5" class="hint">暂未发现设备 · 采集器模式下等微服上报（约 60 秒一轮）；本机模式需在 App 内点「立即扫描」</td></tr>'; return; }
     var html='';
@@ -607,13 +624,14 @@ function loadDevices(){
       html+='<tr class="dev'+(SEL_IP && selOf(v) === SEL_IP ? ' pinned' : '')+'" data-ip="'+esc(v.ip)+'">'
         +'<td><span class="dot'+(v.online?' on':'')+'"></span></td>'
         +'<td><div class="name" title="'+escA(v.hostname||v.type||v.ip)+'">'+(isSelf(v)?'<span class="me">':'')+esc(cutName(v.hostname||v.type||v.ip, 12))+(isSelf(v)?'</span>':'')+'</div><div class="sub">'+esc([v.ip, v.hostname?(v.type||''):'', v.mac].filter(Boolean).join(' · '))+'</div></td>'
-        +'<td class="sub">'+esc(v.vendor || jsVendor(v.mac) || '—')+'</td>'
+        +'<td class="sub">'+esc(v.vendor || obsVendor(v.mac) || '—')+'</td>'
         +'<td class="sub">'+esc(v.type || v.hostname || '—')+'</td>'
         +'<td class="num sub">'+esc(fmtAgo(v.last_seen))+'</td></tr>';
     });
     b.innerHTML=html;
     Array.prototype.forEach.call(b.querySelectorAll('tr.dev'),function(tr){
       tr.addEventListener('click',function(){ openDetail(tr.getAttribute('data-ip')); });
+    });
     });
   }).catch(function(){});
 }

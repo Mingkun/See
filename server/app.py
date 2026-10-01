@@ -1101,6 +1101,24 @@ def api_gw_name_set():
     return jsonify(ok=True, key=key, name=name)
 
 
+@app.route('/api/vendor', methods=['OPTIONS', 'GET'])
+def api_vendor():
+    """批量 MAC → 厂商（58k OUI 库 + macvendors 兜底）。本机客户端模式用来补齐厂商列。"""
+    if request.method == 'OPTIONS':
+        return _opt('GET, OPTIONS')
+    if _auth_kind() is None:
+        return _deny()
+    macs = (request.args.get('macs') or '').split(',')[:128]
+    out = {}
+    for m in macs:
+        m = m.strip()
+        if m:
+            v = _vendor_of(m)
+            if v:
+                out[m.upper()] = v
+    return jsonify(ok=True, vendors=out)
+
+
 @app.route('/api/gw/cred', methods=['OPTIONS', 'GET'])
 def api_gw_cred():
     """采集器专用：取网关登录凭据（含明文密码）。仅机器密钥可用。"""
