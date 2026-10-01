@@ -165,7 +165,8 @@ def api_devices():
         ip = d['ip']
         sp = monitor.speeds(ip) if GATEWAY else {'up': 0, 'down': 0}
         sess = monitor.totals(ip) if GATEWAY else {'up': 0, 'down': 0}
-        out.append({'mac': d['mac'], 'ip': ip, 'hostname': d['hostname'], 'vendor': d['vendor'],
+        out.append({'mac': d['mac'], 'ip': ip, 'hostname': d['hostname'],
+                    'vendor': d['vendor'] or _vendor_of(d['mac']),
                     'online': d['online'], 'last_seen': d['last_seen'], 'speed': sp,
                     'session': sess, 'today': _live_today(ip) if GATEWAY else {'up': 0, 'down': 0}})
     out.sort(key=lambda x: (not x['online'], -(x['speed']['up'] + x['speed']['down'])))
@@ -190,6 +191,7 @@ def api_device():
             break
     if dev is None:
         dev = {'ip': ip, 'mac': '', 'hostname': '', 'vendor': '', 'online': False, 'last_seen': 0}
+    dev['vendor'] = dev.get('vendor') or _vendor_of(dev.get('mac'))
     series = store.minute_series(ip, 90)
     return jsonify(ok=True, device=dev, series=series,
                    apps=monitor.apps(ip) if GATEWAY else [],
@@ -473,6 +475,26 @@ def _save_names(m):
         pass
     os.replace(tmp, NAME_OV_PATH)
     _MERGE_CACHE[0] = 0.0     # 改名影响同名分组，立即重算
+
+
+OUI_PATH = os.path.join(ROOT, 'data', 'oui.json')
+_OUI_DB = {}
+
+
+def _load_oui():
+    """IEEE OUI 官方数据库（Wireshark manuf 解析，4 万条）→ MAC 前缀 → 厂商。"""
+    global _OUI_DB
+    try:
+        with open(OUI_PATH, encoding='utf-8') as f:
+            _OUI_DB = json.load(f)
+    except Exception:  # noqa: BLE001
+        _OUI_DB = {}
+
+
+def _vendor_of(mac):
+    if not _OUI_DB:
+        _load_oui()
+    return _OUI_DB.get(str(mac or '').replace(':', '').upper()[:6], '')
 
 
 OFF_MAX_MIN = 1440          # 「暂停 N 分钟」上限（24 小时）
@@ -853,6 +875,9 @@ def api_obs_report():
     rows = data.get('devices') or []
     if not isinstance(rows, list):
         return jsonify(ok=False, error='devices 应为数组'), 400
+    for r in rows[:512]:
+        if not r.get('vendor'):
+            r['vendor'] = _vendor_of(r.get('mac') or '')
     n = scanner.apply_report(rows[:512])
     return jsonify(ok=True, n=n)
 
