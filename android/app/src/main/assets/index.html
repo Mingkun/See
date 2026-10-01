@@ -298,8 +298,8 @@
     <div class="pt"><span>设备</span><button id="scanBtn" onclick="doScan()" class="btn sm">🔄 立即扫描</button></div>
     <div class="scrollx">
     <table class="tbl-dev">
-      <thead><tr><th></th><th>设备</th><th>厂商</th><th>最近活跃</th></tr></thead>
-      <tbody id="devBody"><tr><td colspan="4" class="hint">加载中…</td></tr></tbody>
+      <thead><tr><th></th><th>设备</th><th>厂商</th><th>设备自述</th><th>最近活跃</th></tr></thead>
+      <tbody id="devBody"><tr><td colspan="5" class="hint">加载中…</td></tr></tbody>
     </table>
     </div>
     <div class="hint" id="netInfo"></div>
@@ -578,7 +578,7 @@ function doScan(){
   b.textContent='扫描中…';
   // 先清空观察页历史（设备表 + 动态），给用户一个干净的起点，再由新一轮扫描填充
   var db=document.getElementById('devBody');
-  if(db) db.innerHTML='<tr><td colspan="4" class="hint">已清空历史 · 正在重新扫描…</td></tr>';
+  if(db) db.innerHTML='<tr><td colspan="5" class="hint">已清空历史 · 正在重新扫描…</td></tr>';
   var eb=document.getElementById('evBody');
   if(eb) eb.innerHTML='<div class="hint">已清空历史 · 等待新一轮动态…</div>';
   fetch('api/scan').catch(function(){}).then(function(){ setTimeout(function(){ b.textContent='🔄 立即扫描'; loadDevices(); loadEvents(); },2000); });
@@ -600,7 +600,7 @@ function loadDevices(){
   obsFetch('/devices').then(function(r){return r.json()}).then(function(d){
     if(!d||!d.ok) return;
     var b=document.getElementById('devBody');
-    if(!d.devices.length){ b.innerHTML='<tr><td colspan="4" class="hint">暂未发现设备 · 采集器模式下等微服上报（约 60 秒一轮）；本机模式需在 App 内点「立即扫描」</td></tr>'; return; }
+    if(!d.devices.length){ b.innerHTML='<tr><td colspan="5" class="hint">暂未发现设备 · 采集器模式下等微服上报（约 60 秒一轮）；本机模式需在 App 内点「立即扫描」</td></tr>'; return; }
     var html='';
     pinSel(d.devices);
     d.devices.forEach(function(v){
@@ -608,6 +608,7 @@ function loadDevices(){
         +'<td><span class="dot'+(v.online?' on':'')+'"></span></td>'
         +'<td><div class="name" title="'+escA(v.hostname||v.type||v.ip)+'">'+(isSelf(v)?'<span class="me">':'')+esc(cutName(v.hostname||v.type||v.ip, 12))+(isSelf(v)?'</span>':'')+'</div><div class="sub">'+esc([v.ip, v.hostname?(v.type||''):'', v.mac].filter(Boolean).join(' · '))+'</div></td>'
         +'<td class="sub">'+esc(v.vendor || jsVendor(v.mac) || '—')+'</td>'
+        +'<td class="sub">'+esc(v.type || v.hostname || '—')+'</td>'
         +'<td class="num sub">'+esc(fmtAgo(v.last_seen))+'</td></tr>';
     });
     b.innerHTML=html;
