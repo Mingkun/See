@@ -221,7 +221,8 @@
   #anLivePanel .pt { flex-wrap:nowrap; }
   #anSub { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .legend { padding:6px var(--pad-x) 0; font-size:var(--fs-sm); color:var(--muted); }
-  #anLeg3 { text-align:center; line-height:1.6; }
+  #anLeg3 { text-align:center; line-height:1.6; padding-bottom:12px; }   /* 卡片底部留一点空白 */
+  #anLeg3:empty { padding-bottom:0; }
   #lvHint { text-align:center; }
   .chart { display:flex; align-items:flex-end; gap:1px; height:70px; margin:8px 0 2px; }
   .chart .b { flex:1; background:#bfdbfe; border-radius:1px 1px 0 0; position:relative; }
