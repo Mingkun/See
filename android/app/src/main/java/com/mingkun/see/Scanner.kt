@@ -78,7 +78,7 @@ class Scanner(private val db: Db) : Thread() {
         val pool = Executors.newFixedThreadPool(64)
         for (i in 1..count) {
             val ip = longToIp(base + i)
-            pool.execute { if (ping(ip)) alive.add(ip) }
+            pool.execute { udpPoke(ip); if (ping(ip)) alive.add(ip) }
         }
         pool.shutdown()
         try { pool.awaitTermination(25, TimeUnit.SECONDS) } catch (_: Exception) {}
@@ -222,11 +222,35 @@ class Scanner(private val db: Db) : Thread() {
         InetAddress.getByName(ip).canonicalHostName.takeIf { it != ip } ?: ""
     } catch (_: Exception) { "" }
 
-    private fun vendor(mac: String): String = try {
+    /** 快速 UDP 探测（发到 discard 端口 9）：不回 ping 的设备也能把 ARP 表刷出来 */
+    private fun udpPoke(ip: String) {
+        try {
+            val s = java.net.DatagramSocket()
+            s.soTimeout = 150
+            val addr = java.net.InetAddress.getByName(ip)
+            s.send(java.net.DatagramPacket(ByteArray(0), 0, addr, 9))
+            s.close()
+        } catch (_: Exception) {}
+    }
+
+    /** 常见厂商 OUI（本地表，秒回、离线可用）；认不出的再试外网 macvendors */
+    private val localOui = mapOf(
+        "246F28" to "乐鑫Espressif", "30AEA4" to "乐鑫Espressif", "5CCF7F" to "乐鑫Espressif",
+        "A4CF12" to "乐鑫Espressif", "BCDDC2" to "乐鑫Espressif", "68C63A" to "乐鑫Espressif",
+        "24B2DE" to "乐鑫Espressif", "183AF0" to "乐鑫Espressif", "D8A01B" to "乐鑫Espressif",
+        "640980" to "小米", "7811DC" to "小米", "ACC1EE" to "小米", "508F4C" to "小米", "F8A45F" to "小米",
+        "ECA62F" to "华为"
+    )
+
+    private fun vendor(mac: String): String {
+        val local = localOui[mac.replace(":", "").uppercase().take(6)]
+        if (local != null) return local
+        return try {
         val conn = URL("https://api.macvendors.com/$mac").openConnection() as HttpURLConnection
         conn.connectTimeout = 4000; conn.readTimeout = 4000
         val v = conn.inputStream.readBytes().toString(Charsets.UTF_8).trim()
-        Thread.sleep(1200)
-        v.take(32)
-    } catch (_: Exception) { "" }
+            Thread.sleep(1200)
+            v.take(32)
+        } catch (_: Exception) { "" }
+    }
 }

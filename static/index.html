@@ -592,7 +592,8 @@ function loadStatus(){
   fetch('api/status').then(function(r){return r.json()}).then(function(d){
     if(!d||!d.ok) return;
     if (d.ip) SELF_IP = String(d.ip);
-    document.getElementById('netInfo').textContent = '手机IP '+d.ip+' · 网段 '+d.subnet+' · 观察模式（接入/在线）'+(d.scan_error?' · '+d.scan_error:'');
+    var wf = (d.wifi && (d.wifi.ssid || d.wifi.rssi)) ? (' · WiFi '+(d.wifi.ssid ? d.wifi.ssid+' ' : '')+(d.wifi.rssi||'')+'dBm'+(d.wifi.linkMbps?' · '+d.wifi.linkMbps+'Mbps':'')+(d.wifi.gateway?' · 网关 '+d.wifi.gateway:'')) : '';
+    document.getElementById('netInfo').textContent = '手机IP '+d.ip+' · 网段 '+d.subnet+wf+' · 观察模式（接入/在线）'+(d.scan_error?' · '+d.scan_error:'');
   }).catch(function(){});
 }
 function loadDevices(){

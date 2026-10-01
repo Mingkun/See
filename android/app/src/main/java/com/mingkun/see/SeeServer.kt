@@ -118,14 +118,34 @@ class SeeServer(private val ctx: Context, private val scanner: Scanner, private 
             online = scanner.devices.values.count { it.online }
         }
         val o = JSONObject()
-        o.put("ok", true); o.put("mode", "observer"); o.put("iface", "wifi"); o.put("ver", "3.34"); o.put("vercode", 145)
+        o.put("ok", true); o.put("mode", "observer"); o.put("iface", "wifi"); o.put("ver", "3.35"); o.put("vercode", 146)
         o.put("subnet", scanner.subnet); o.put("ip", phoneIp)
+        o.put("wifi", wifiInfo())
         o.put("uptime", System.currentTimeMillis() / 1000 - scanner.startTs)
         o.put("online", online); o.put("devices", total)
         val sp = JSONObject(); sp.put("up", 0); sp.put("down", 0)
         o.put("total_speed", sp); o.put("pkt_count", 0)
         o.put("scan_error", scanner.lastError); o.put("last_sweep", scanner.lastSweep)
         return json(o)
+    }
+
+    /** 本机 WiFi 信息：SSID/信号/协商速率/网关（拿不到就空对象，页面自动省略） */
+    private fun wifiInfo(): org.json.JSONObject {
+        val o = org.json.JSONObject()
+        try {
+            val wm = ctx.getSystemService(android.content.Context.WIFI_SERVICE) as android.net.wifi.WifiManager
+            val info = wm.connectionInfo ?: return o
+            o.put("rssi", info.rssi)
+            o.put("linkMbps", info.linkSpeed)
+            val ssid = (info.ssid ?: "").removeSurrounding("\"")
+            if (ssid.isNotEmpty() && ssid != "<unknown ssid>") o.put("ssid", ssid)
+            try {
+                @Suppress("DEPRECATION")
+                val dhcp = wm.dhcpInfo
+                if (dhcp != null) o.put("gateway", android.text.format.Formatter.formatIpAddress(dhcp.gateway))
+            } catch (_: Exception) {}
+        } catch (_: Exception) {}
+        return o
     }
 
     private fun devices(): Response {
