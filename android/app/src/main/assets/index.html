@@ -407,6 +407,13 @@
     <div class="sec">设备改名</div>
     <div class="sub ml-0 mt-1">网关识别的名字太泛（如"电脑"）或为空的，在这里改；设备列表/拓扑/分析页全生效，支持中文。留空保存 = 恢复网关名。</div>
     <div id="nmBox" class="mt-2">加载中…</div>
+    <div class="sec">观察页数据源</div>
+    <div class="sub ml-0 mt-1">「采集器」=微服在局域网里扫描上报（MAC/厂商，最全，默认）；「本机客户端」=用手机自己扫（仅 App 内有效，浏览器里无数据）。</div>
+    <div class="row mt-2">
+      <button type="button" id="obsSrcBtnC" class="btn" onclick="obsSrcSet('collector')">采集器（默认）</button>
+      <button type="button" id="obsSrcBtnL" class="btn ghost" onclick="obsSrcSet('local')">本机客户端</button>
+    </div>
+    <div id="obsSrcOut" class="sub mt-2"></div>
     <div class="sec">访问与安全</div>
     <div class="sub ml-0 mt-1">采集器密钥只给家里的微服用（装采集器时填）。别外传，也别贴到聊天里。</div>
     <div class="row mt-2">
@@ -468,11 +475,40 @@ var curIp = '';
 var AN_HOUR_ASC = [];    // 分时用量表：按时间由早到晚生成的原始行（HTML 片段）
 var AN_HOUR_DESC = false; // 是否倒序显示（最新的一小时排在最上面）；真值存在后端 data/ui-prefs.json
 var UI_PREFS = {};        // 后端保存的界面偏好，重登/换设备都读这份
+/* 观察页数据源：collector=微服采集器（云端库，默认） local=本机客户端（App 内 SeeServer） */
+var OBS_SRC = 'collector';
+var JS_OUI = { '246F28': '乐鑫Espressif', '30AEA4': '乐鑫Espressif', '5CCF7F': '乐鑫Espressif',
+  'A4CF12': '乐鑫Espressif', 'BCDDC2': '乐鑫Espressif', '68C63A': '乐鑫Espressif',
+  '24B2DE': '乐鑫Espressif', '183AF0': '乐鑫Espressif', 'D8A01B': '乐鑫Espressif',
+  '640980': '小米', '7811DC': '小米', 'ACC1EE': '小米', '508F4C': '小米', 'F8A45F': '小米',
+  'ECA62F': '华为' };
+function jsVendor(mac){ return JS_OUI[String(mac || '').replace(/:/g, '').slice(0, 6).toUpperCase()] || ''; }
+function obsFetch(path, opts){
+  return OBS_SRC === 'collector' ? apiFetch(API + path, opts) : fetch('api' + path, opts);
+}
+function obsSrcApply(){
+  var a = document.getElementById('obsSrcBtnC'), b = document.getElementById('obsSrcBtnL');
+  if (a) a.className = 'btn' + (OBS_SRC === 'collector' ? '' : ' ghost');
+  if (b) b.className = 'btn' + (OBS_SRC === 'local' ? '' : ' ghost');
+  var o = document.getElementById('obsSrcOut');
+  if (o) o.textContent = OBS_SRC === 'collector'
+    ? '当前：采集器（微服在局域网扫描上报，约 60 秒一轮）'
+    : '当前：本机客户端（仅 App 内有效；浏览器里无数据）';
+}
+function obsSrcSet(v){
+  if (OBS_SRC === v) return;
+  OBS_SRC = v;
+  obsSrcApply();
+  savePref('obsSrc', v);
+  loadDevices(); loadEvents();
+}
 function loadPrefs(){
   return apiFetch(API + '/prefs').then(function(r){ return r.json(); }).then(function(j){
     if (j && j.ok && j.prefs){
       UI_PREFS = j.prefs;
       AN_HOUR_DESC = !!UI_PREFS.hour_desc;
+      OBS_SRC = (UI_PREFS.obsSrc === 'local') ? 'local' : 'collector';
+      obsSrcApply();
       paintHourRows();
     }
   }).catch(function(){});
@@ -532,7 +568,14 @@ function fmtAgo(t){
 function fmtTs(t){ var d=new Date(t*1000); return d.getHours()+':'+(d.getMinutes()<10?'0':'')+d.getMinutes(); }
 
 function doScan(){
-  var b=document.getElementById('scanBtn'); b.textContent='扫描中…';
+  var b=document.getElementById('scanBtn');
+  if (OBS_SRC === 'collector'){
+    b.textContent = '采集中…';
+    loadDevices(); loadEvents();
+    setTimeout(function(){ b.textContent = '🔄 刷新'; }, 1500);
+    return;
+  }
+  b.textContent='扫描中…';
   // 先清空观察页历史（设备表 + 动态），给用户一个干净的起点，再由新一轮扫描填充
   var db=document.getElementById('devBody');
   if(db) db.innerHTML='<tr><td colspan="3" class="hint">已清空历史 · 正在重新扫描…</td></tr>';
@@ -541,6 +584,11 @@ function doScan(){
   fetch('api/scan').catch(function(){}).then(function(){ setTimeout(function(){ b.textContent='🔄 立即扫描'; loadDevices(); loadEvents(); },2000); });
 }
 function loadStatus(){
+  if (OBS_SRC === 'collector'){
+    var n0 = document.getElementById('netInfo');
+    if (n0) n0.textContent = '数据源：微服采集器（局域网 MAC/厂商扫描，约 60 秒一轮）';
+    return;
+  }
   fetch('api/status').then(function(r){return r.json()}).then(function(d){
     if(!d||!d.ok) return;
     if (d.ip) SELF_IP = String(d.ip);
@@ -548,7 +596,7 @@ function loadStatus(){
   }).catch(function(){});
 }
 function loadDevices(){
-  fetch('api/devices').then(function(r){return r.json()}).then(function(d){
+  obsFetch('/devices').then(function(r){return r.json()}).then(function(d){
     if(!d||!d.ok) return;
     var b=document.getElementById('devBody');
     if(!d.devices.length){ b.innerHTML='<tr><td colspan="3" class="hint">暂未发现设备 · 确保已连WiFi；点右上「立即扫描」（首轮约10-30秒；若路由器开了AP隔离则互相不可见）</td></tr>'; return; }
@@ -557,7 +605,7 @@ function loadDevices(){
     d.devices.forEach(function(v){
       html+='<tr class="dev'+(SEL_IP && selOf(v) === SEL_IP ? ' pinned' : '')+'" data-ip="'+esc(v.ip)+'">'
         +'<td><span class="dot'+(v.online?' on':'')+'"></span></td>'
-        +'<td><div class="name" title="'+escA(v.hostname||v.type||v.ip)+'">'+(isSelf(v)?'<span class="me">':'')+esc(cutName(v.hostname||v.type||v.ip, 12))+(isSelf(v)?'</span>':'')+'</div><div class="sub">'+esc([v.ip, v.hostname?(v.type||''):'', v.mac].filter(Boolean).join(' · '))+'</div></td>'
+        +'<td><div class="name" title="'+escA(v.hostname||v.type||v.ip)+'">'+(isSelf(v)?'<span class="me">':'')+esc(cutName(v.hostname||v.type||v.ip, 12))+(isSelf(v)?'</span>':'')+'</div><div class="sub">'+esc([v.ip, v.hostname?(v.type||''):'', v.mac, v.vendor || jsVendor(v.mac)].filter(Boolean).join(' · '))+'</div></td>'
         +'<td class="num sub">'+esc(fmtAgo(v.last_seen))+'</td></tr>';
     });
     b.innerHTML=html;
@@ -567,7 +615,7 @@ function loadDevices(){
   }).catch(function(){});
 }
 function loadEvents(){
-  fetch('api/events?limit=40').then(function(r){return r.json()}).then(function(d){
+  obsFetch('/events?limit=40').then(function(r){return r.json()}).then(function(d){
     if(!d||!d.ok) return;
     var b=document.getElementById('evBody');
     if(!d.events.length){ b.innerHTML='<div class="hint">暂无动态</div>'; return; }

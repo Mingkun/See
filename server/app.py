@@ -241,7 +241,7 @@ def _cors(resp):
 CFG_PATH = os.path.join(ROOT, 'data', 'gw-config.json')
 PREF_PATH = os.path.join(ROOT, 'data', 'ui-prefs.json')
 # 允许存到后端的界面偏好（白名单，值是类型），换设备登录也认这份
-PREF_KEYS = {'hour_desc': bool}
+PREF_KEYS = {'hour_desc': bool, 'obsSrc': str}   # obsSrc: collector|local（观察页数据源）
 KEY_PATH = os.path.join(ROOT, 'data', 'api-key.txt')
 # 换密钥时的过渡：旧密钥放这里，只在 KEY_GRACE_HOURS 内认（到期自动作废，文件不用删）
 KEY_PREV_PATH = os.path.join(ROOT, 'data', 'api-key.prev')
@@ -841,6 +841,21 @@ def api_config():
 
 
 # ---------- 网关设备流量采样（app 上传 / 网页读取）----------
+
+@app.route('/api/obs/report', methods=['OPTIONS', 'POST'])
+def api_obs_report():
+    """采集器上报的局域网发现（观察页数据源：MAC/厂商/在线）。仅机器密钥。"""
+    if request.method == 'OPTIONS':
+        return _opt('POST, OPTIONS')
+    if _auth_kind() != 'key':
+        return _deny()
+    data = request.get_json(force=True, silent=True) or {}
+    rows = data.get('devices') or []
+    if not isinstance(rows, list):
+        return jsonify(ok=False, error='devices 应为数组'), 400
+    n = scanner.apply_report(rows[:512])
+    return jsonify(ok=True, n=n)
+
 
 @app.route('/api/gw/samples', methods=['OPTIONS', 'POST'])
 def api_gw_samples():

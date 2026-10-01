@@ -22,6 +22,7 @@ class Scanner(threading.Thread):
         self.interval = interval
         self.offline_after = offline_after
         self.seen = {}  # mac -> {ip, hostname, vendor, last_seen, online}
+        self.external_ts = 0.0   # 采集器上报时间：近 120s 内有上报就不本机扫
         self.known_macs = set()  # macs recorded before startup (no re-join spam)
         self.lock = threading.Lock()
         self.last_sweep = 0
@@ -116,8 +117,51 @@ class Scanner(threading.Thread):
             return ''
 
     # ---------- main loop ----------
+    def apply_report(self, rows):
+        """采集器上报的局域网发现结果（ip/mac/vendor）→ 喂进 seen 并记 join/online/offline 事件。
+        外部源生效期间（120s 内有上报）run() 不再本机扫。"""
+        now = time.time()
+        with self.lock:
+            self.external_ts = now
+            for r in rows:
+                mac = str(r.get('mac') or '').upper()
+                ip = str(r.get('ip') or '').strip()
+                if not mac or not ip or mac == '00:00:00:00:00:00':
+                    continue
+                st = self.seen.get(mac)
+                if st is None:
+                    hostname = str(r.get('hostname') or '')
+                    vendor = str(r.get('vendor') or '')
+                    st = {'ip': ip, 'hostname': hostname, 'vendor': vendor,
+                          'last_seen': now, 'online': True}
+                    self.seen[mac] = st
+                    self.store.upsert_device(mac, ip, hostname or None, vendor or None, int(now))
+                    if mac not in self.known_macs:
+                        self.known_macs.add(mac)
+                        self.store.add_event('join', ip, mac, hostname)
+                else:
+                    was_offline = not st['online']
+                    st['ip'] = ip
+                    if r.get('hostname'):
+                        st['hostname'] = str(r['hostname'])
+                    if r.get('vendor'):
+                        st['vendor'] = str(r['vendor'])
+                    st['last_seen'] = now
+                    st['online'] = True
+                    self.store.upsert_device(mac, ip, st['hostname'] or None, st['vendor'] or None, int(now))
+                    if was_offline:
+                        self.store.add_event('online', ip, mac, st['hostname'])
+            for mac, st in self.seen.items():
+                if st['online'] and st['last_seen'] and now - st['last_seen'] > 180:
+                    st['online'] = False
+                    self.store.add_event('offline', st['ip'], mac, st['hostname'])
+        return len(self.seen)
+
     def run(self):
         while True:
+            if time.time() - self.external_ts < 120:
+                time.sleep(self.interval)   # 采集器在喂数据，本机不扫（云服务器上也扫不到家里）
+                continue
             found = self.sweep()
             now = time.time()
             self.last_sweep = int(now)

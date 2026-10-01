@@ -23,6 +23,7 @@ import http.cookiejar
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 import urllib.error
@@ -65,6 +66,17 @@ class Http(object):
     def post(self, url, body, headers=None):
         req = urllib.request.Request(url, data=body, headers=headers or {})
         return self._open(req)
+
+
+# 常见厂商 OUI 前缀（MAC 前 3 字节去冒号）：认不出就空着，不瞎猜。
+# 条目来自常见 IoT 厂商公开 OUI + 本网关 devInfo 实测（ECA62F=华为光猫）。
+OUI_VENDORS = {
+    '246F28': '乐鑫Espressif', '30AEA4': '乐鑫Espressif', '5CCF7F': '乐鑫Espressif',
+    'A4CF12': '乐鑫Espressif', 'BCDDC2': '乐鑫Espressif', '68C63A': '乐鑫Espressif',
+    '24B2DE': '乐鑫Espressif', '183AF0': '乐鑫Espressif', 'D8A01B': '乐鑫Espressif',
+    '640980': '小米', '7811DC': '小米', 'ACC1EE': '小米', '508F4C': '小米', 'F8A45F': '小米',
+    'ECA62F': '华为',
+}
 
 
 class Gateway(object):
@@ -274,6 +286,52 @@ class Collector(object):
             self.buf.append([now, dk, name, ip, 0, 0.0, 0.0, lk])
         return n
 
+    # ---------- 局域网发现（观察页数据源：MAC/厂商/在线） ----------
+    def lan_scan(self):
+        """ping 全网段后读 /proc/net/arp → [{ip, mac, vendor}]（免 root）。"""
+        import concurrent.futures
+        gw_ip = self.gw_ip or self.cfg.get('ip') or '192.168.1.1'
+        prefix = gw_ip.rsplit('.', 1)[0]
+        devnull = subprocess.DEVNULL
+
+        def ping(ip):
+            try:
+                subprocess.run(['ping', '-c', '1', '-W', '1', '-n', ip],
+                               stdout=devnull, stderr=devnull, timeout=3)
+            except Exception:  # noqa: BLE001
+                pass
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=64) as ex:
+            list(ex.map(ping, ['%s.%d' % (prefix, i) for i in range(1, 255)]))
+        out = []
+        try:
+            for line in open('/proc/net/arp', encoding='utf-8', errors='ignore').read().splitlines()[1:]:
+                f = line.split()
+                if len(f) >= 4 and f[2] == '0x2':
+                    ip, hw = f[0], f[3].upper()
+                    if ip.startswith(prefix + '.') and hw and hw != '00:00:00:00:00:00':
+                        out.append({'ip': ip, 'mac': hw,
+                                    'vendor': OUI_VENDORS.get(hw.replace(':', '')[:6], '')})
+        except Exception:  # noqa: BLE001
+            pass
+        return out
+
+    def report_obs(self):
+        devs = self.lan_scan()
+        body = json.dumps({'devices': devs}, ensure_ascii=False).encode()
+        try:
+            st, txt = self.http.post(self.api + '/api/obs/report', body,
+                                     {'Content-Type': 'application/json', 'X-See-Key': self.key})
+            j = json.loads(txt)
+            if not j.get('ok'):
+                log('观察上报被拒：%s' % j.get('error'))
+                return 0
+        except Exception as e:  # noqa: BLE001
+            log('观察上报失败（忽略）：%s' % e)
+            return 0
+        log('观察上报：%d 台（MAC/厂商）' % len(devs))
+        return len(devs)
+
     def selfcheck(self):
         ok = True
         if not self.refresh_cfg():
@@ -329,6 +387,7 @@ class Collector(object):
                     if n and (n > 1 or time.time() - self.up_log >= 60):
                         self.up_log = time.time()
                         log('已上传 %d 条（buffer 余 %d）' % (n, len(self.buf)))
+                    self.report_obs()   # 顺带上报局域网发现（观察页数据源）
             except KeyboardInterrupt:
                 log('收到中断，退出')
                 self.flush()
