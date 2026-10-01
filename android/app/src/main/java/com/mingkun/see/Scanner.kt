@@ -86,9 +86,103 @@ class Scanner(private val db: Db) : Thread() {
         val found = LinkedHashMap<String, String>()
         for ((ip, mac) in arp) found[ip] = mac
         for (ip in alive) if (!found.containsKey(ip)) found[ip] = "ip:$ip"
+        ssdpScan()
+        mdnsScan()
         merge(found)
         probeTypes()
         lastSweep = System.currentTimeMillis() / 1000
+    }
+
+    /** SSDP/UPnP：M-SEARCH 组播 → 拉 XML → 设备自述（friendlyName/manufacturer/modelName） */
+    private fun ssdpScan() {
+        try {
+            val socket = java.net.DatagramSocket()
+            socket.soTimeout = 500
+            socket.reuseAddress = true
+            val msg = ("M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\n" +
+                "MAN: \"ssdp:discover\"\r\nMX: 2\r\nST: ssdp:all\r\n\r\n").toByteArray()
+            socket.send(java.net.DatagramPacket(msg, msg.size,
+                java.net.InetAddress.getByName("239.255.255.250"), 1900))
+            val locations = mutableMapOf<String, String>()
+            val end = System.currentTimeMillis() + 3000
+            while (System.currentTimeMillis() < end) {
+                try {
+                    val buf = ByteArray(4096)
+                    val pkt = java.net.DatagramPacket(buf, buf.size)
+                    socket.receive(pkt)
+                    val txt = String(pkt.data, 0, pkt.length, Charsets.UTF_8)
+                    val loc = Regex("""LOCATION:\s*(.+)""", RegexOption.IGNORE_CASE)
+                        .find(txt)?.groupValues?.get(1)?.trim() ?: continue
+                    locations[pkt.address.hostAddress ?: continue] = loc
+                } catch (_: java.net.SocketTimeoutException) { break }
+            }
+            socket.close()
+            for ((ip, url) in locations.entries.take(15)) {
+                try {
+                    val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+                    conn.connectTimeout = 3000; conn.readTimeout = 3000
+                    val xml = conn.inputStream.readBytes().toString(Charsets.UTF_8)
+                    val fn = Regex("<friendlyName>(.*?)</friendlyName>", RegexOption.DOT_MATCHES_ALL).find(xml)?.groupValues?.get(1)?.trim() ?: ""
+                    val mf = Regex("<manufacturer>(.*?)</manufacturer>", RegexOption.DOT_MATCHES_ALL).find(xml)?.groupValues?.get(1)?.trim() ?: ""
+                    val md = Regex("<modelName>(.*?)</modelName>", RegexOption.DOT_MATCHES_ALL).find(xml)?.groupValues?.get(1)?.trim() ?: ""
+                    synchronized(lock) {
+                        for ((_, d) in devices) {
+                            if (d.ip == ip) {
+                                if (fn.isNotEmpty() && d.hostname.isEmpty()) d.hostname = fn.take(24)
+                                if (mf.isNotEmpty() && d.vendor.isEmpty()) d.vendor = mf.take(24)
+                                if (md.isNotEmpty() && d.type.isEmpty()) d.type = md.take(24)
+                                db.upsert(macOf(d.ip) ?: "", ip, d.hostname, d.vendor, System.currentTimeMillis() / 1000)
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        } catch (_: Exception) {}
+    }
+
+    /** mDNS：DNS-SD PTR 查询 → 抓 _xxx._tcp/_udp 服务名 → type */
+    private fun mdnsScan() {
+        try {
+            val query = byteArrayOf(0,0,1,0,0,1,0,0,0,0,0,0) +
+                "_services".toByteArray() + byteArrayOf(7) + "_dns-sd".toByteArray() +
+                byteArrayOf(7) + "_udp".toByteArray() + byteArrayOf(5) + "local".toByteArray() +
+                byteArrayOf(0,0,12,0,1)
+            val socket = java.net.DatagramSocket()
+            socket.soTimeout = 500
+            socket.send(java.net.DatagramPacket(query, query.size,
+                java.net.InetAddress.getByName("224.0.0.251"), 5353))
+            val svc = mutableMapOf<String, MutableSet<String>>()
+            val end = System.currentTimeMillis() + 2500
+            while (System.currentTimeMillis() < end) {
+                try {
+                    val buf = ByteArray(4096)
+                    val pkt = java.net.DatagramPacket(buf, buf.size)
+                    socket.receive(pkt)
+                    val raw = String(pkt.data, 0, pkt.length, Charsets.ISO_8859_1)
+                    val names = Regex("""_[a-zA-Z0-9-]{2,32}\._[a-zA-Z0-9-]{2,16}\._(?:tcp|udp)""")
+                        .findAll(raw).map { it.value }.toSet()
+                    if (names.isNotEmpty()) {
+                        val ip = pkt.address.hostAddress ?: continue
+                        svc.getOrPut(ip) { mutableSetOf() }.addAll(names)
+                    }
+                } catch (_: java.net.SocketTimeoutException) { break }
+            }
+            socket.close()
+            synchronized(lock) {
+                for ((ip, svcs) in svc) {
+                    for ((_, d) in devices) {
+                        if (d.ip == ip && d.type.isEmpty() && svcs.isNotEmpty()) {
+                            d.type = svcs.joinToString("·").take(24)
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun macOf(ip: String): String? {
+        synchronized(lock) { for ((mac, d) in devices) if (d.ip == ip) return mac }
+        return null
     }
 
     private val probePorts = listOf(
