@@ -99,34 +99,26 @@ class MainActivity : Activity() {
         pendingApkSize = if (size > 0) size else 0L
         pendingApkMd5 = (md5 ?: "").trim().lowercase()
         purgeStaleApks(dest)
-        try {
-            val request = android.app.DownloadManager.Request(android.net.Uri.parse(url))
-            request.setTitle("see 更新 v" + ver)
-            request.setMimeType("application/vnd.android.package-archive")
-            request.addRequestHeader("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
-            request.setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            request.setDestinationInExternalFilesDir(this, null, dest)
-            val dm = getSystemService(DOWNLOAD_SERVICE) as android.app.DownloadManager
-            updateDownloadId = dm.enqueue(request)
-        } catch (e: Exception) {
-            try { startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))) } catch (_: Exception) {}
-        }
+        Thread {
+            try {
+                val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+                conn.connectTimeout = 15000; conn.readTimeout = 60000
+                conn.setRequestProperty("User-Agent", "Mozilla/5.0")
+                val file = java.io.File(getExternalFilesDir(null), dest)
+                java.io.FileOutputStream(file).use { output -> conn.inputStream.use { input -> input.copyTo(output) } }
+                conn.disconnect()
+                runOnUiThread { openDownloadedApk() }
+            } catch (e: Exception) {
+                runOnUiThread { android.widget.Toast.makeText(this@MainActivity, "下载失败: " + (e.message ?: "?"), android.widget.Toast.LENGTH_LONG).show() }
+            }
+        }.start()
+        android.widget.Toast.makeText(this, "see 开始下载更新…", android.widget.Toast.LENGTH_SHORT).show()
     }
 
     private fun openDownloadedApk() {
         try {
             // 先看 DownloadManager 自己的结论：没下成功就别把半截包丢给安装器。
-            var status = -1
-            try {
-                val dm = getSystemService(DOWNLOAD_SERVICE) as android.app.DownloadManager
-                dm.query(android.app.DownloadManager.Query().setFilterById(updateDownloadId))?.use { c ->
-                    if (c.moveToFirst()) status = c.getInt(c.getColumnIndexOrThrow(android.app.DownloadManager.COLUMN_STATUS))
-                }
-            } catch (_: Exception) {}
-            if (status != android.app.DownloadManager.STATUS_SUCCESSFUL) {
-                toast("下载没完成，请稍后重试")
-                return
-            }
+            // 直连下载完才会调到这里，不再查 DownloadManager 状态
             val dir = getExternalFilesDir(null) ?: return
             val file = (pendingApkName?.let { java.io.File(dir, it) })?.takeIf { it.exists() }
                 ?: dir.listFiles()?.filter { it.name.startsWith("see-update") && it.name.endsWith(".apk") }
