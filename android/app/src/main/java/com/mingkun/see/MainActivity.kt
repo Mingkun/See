@@ -184,6 +184,17 @@ class MainActivity : Activity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Thread.setDefaultUncaughtExceptionHandler { t, e ->
+            try {
+                java.io.File(getExternalFilesDir(null), "crash.txt").writeText(
+                    "time=" + System.currentTimeMillis() + "\nthread=" + t.name + "\n" + android.util.Log.getStackTraceString(e))
+            } catch (_: Exception) {}
+            android.os.Process.killProcess(android.os.Process.myPid())
+        }
+        val lastCrash = try {
+            val cf = java.io.File(getExternalFilesDir(null), "crash.txt")
+            if (cf.isFile) cf.readText().also { cf.delete() } else null
+        } catch (_: Exception) { null }
         var serverOk = false
         try {
             db = Db(this)
@@ -259,7 +270,7 @@ class MainActivity : Activity() {
                         web.postDelayed({
                             web.loadDataWithBaseURL(null,
                                 "<html><body style='font-family:sans-serif;padding:24px;line-height:1.6'>" +
-                                "<h2>see v3.42</h2><p>本机服务连接失败</p>" +
+                                "<h2>see v3.43</h2><p>本机服务连接失败</p>" +
                                 "<p style='color:#b02a37;font-size:13px'>" + msg + "</p>" +
                                 "<p style='font-size:12px;color:#666'>点返回键或重新打开应用重试</p></body></html>",
                                 "text/html", "utf-8", null)
@@ -269,16 +280,32 @@ class MainActivity : Activity() {
             }
         }
         setContentView(web)
-        if (android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 2003)
-        }
-        registerReceiver(object : android.content.BroadcastReceiver() {
-            override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
-                val id = intent?.getLongExtra(android.app.DownloadManager.EXTRA_DOWNLOAD_ID, -1L) ?: -1L
-                if (id > 0 && id == updateDownloadId) openDownloadedApk()
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 2003)
             }
-        }, android.content.IntentFilter(android.app.DownloadManager.ACTION_DOWNLOAD_COMPLETE))
-        if (savedInstanceState != null) web.restoreState(savedInstanceState)
+        } catch (_: Exception) {
+        }
+        try {
+            val dlReceiver = object : android.content.BroadcastReceiver() {
+                override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+                    val id = intent?.getLongExtra(android.app.DownloadManager.EXTRA_DOWNLOAD_ID, -1L) ?: -1L
+                    if (id > 0 && id == updateDownloadId) openDownloadedApk()
+                }
+            }
+            val dlFilter = android.content.IntentFilter(android.app.DownloadManager.ACTION_DOWNLOAD_COMPLETE)
+            if (android.os.Build.VERSION.SDK_INT >= 33) registerReceiver(dlReceiver, dlFilter, android.content.Context.RECEIVER_NOT_EXPORTED)
+            else registerReceiver(dlReceiver, dlFilter)
+        } catch (_: Exception) {
+        }
+        if (savedInstanceState != null) { try { web.restoreState(savedInstanceState) } catch (_: Exception) {} }
+        else if (lastCrash != null) {
+            val esc = lastCrash.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            web.loadDataWithBaseURL(null, "<html><body style='font-family:monospace;padding:16px;font-size:12px;white-space:pre-wrap;line-height:1.5'>" +
+                "<h3>see v3.43 上次启动崩溃现场</h3>" +
+                "<p style='color:#b02a37'>请截图发给机器人排查；重新打开应用会再次尝试正常启动</p><hr>" +
+                esc.take(6000) + "</body></html>", "text/html", "utf-8", null)
+        }
         else {
             Thread {
                 try {
@@ -293,10 +320,14 @@ class MainActivity : Activity() {
     }
 
     private fun refreshNet() {
-        val s = detectSubnet()
-        if (s.isNotBlank()) scanner.subnet = s
-        val g = gwIp()
-        if (g.isNotBlank()) scanner.gateway = g
+        try {
+            if (!::scanner.isInitialized) return
+            val s = detectSubnet()
+            if (s.isNotBlank()) scanner.subnet = s
+            val g = gwIp()
+            if (g.isNotBlank()) scanner.gateway = g
+        } catch (_: Exception) {
+        }
     }
 
     /**
@@ -387,8 +418,8 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
-        try { server.stop() } catch (_: Exception) {}
-        scanner.interrupt()
+        try { if (::server.isInitialized) server.stop() } catch (_: Exception) {}
+        try { if (::scanner.isInitialized) scanner.interrupt() } catch (_: Exception) {}
         super.onDestroy()
     }
 
