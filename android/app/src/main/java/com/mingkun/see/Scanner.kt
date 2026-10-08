@@ -25,9 +25,12 @@ class Scanner(private val db: Db) : Thread() {
     val startTs = System.currentTimeMillis() / 1000
 
     override fun run() {
-        for (d in db.devices()) {
-            knownMacs.add(d[0])
-            synchronized(lock) { devices[d[0]] = Dev(d[1], d[2] ?: "", d[3] ?: "", 0, false) }
+        try {
+            for (d in db.devices()) {
+                knownMacs.add(d[0])
+                synchronized(lock) { devices[d[0]] = Dev(d[1], d[2] ?: "", d[3] ?: "", 0, false) }
+            }
+        } catch (_: Exception) {
         }
         while (!isInterrupted) {
             try {

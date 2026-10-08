@@ -184,14 +184,21 @@ class MainActivity : Activity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        db = Db(this)
-        scanner = Scanner(db)
-        scanner.subnet = detectSubnet()
-        scanner.selfIp = localIp()
-        scanner.gateway = gwIp()
-        server = SeeServer(this, scanner, localIp(), db)
-        server.start()
-        scanner.start()
+        var serverOk = false
+        try {
+            db = Db(this)
+            scanner = Scanner(db)
+            scanner.subnet = detectSubnet()
+            scanner.selfIp = localIp()
+            scanner.gateway = gwIp()
+            server = SeeServer(this, scanner, localIp(), db)
+            server.start()
+            scanner.start()
+            serverOk = true
+        } catch (t: Throwable) {
+            // 卓易通等安卓兼容层：本地服务/扫描起不来时不闪退，降级为公网网页模式
+            android.util.Log.e("see", "local stack unavailable, fallback to web mode", t)
+        }
         try {
             val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
             cm.registerNetworkCallback(NetworkRequest.Builder().build(), netCallback)
@@ -200,7 +207,7 @@ class MainActivity : Activity() {
         web = WebView(this)
         web.settings.javaScriptEnabled = true
         web.settings.domStorageEnabled = true
-        web.addJavascriptInterface(Bridge(), "SeeBridge")
+        if (serverOk) web.addJavascriptInterface(Bridge(), "SeeBridge")
         web.setDownloadListener { url, _, contentDisposition, mimeType, _ ->
             try {
                 val name = android.webkit.URLUtil.guessFileName(url, contentDisposition, mimeType)
@@ -252,7 +259,7 @@ class MainActivity : Activity() {
                         web.postDelayed({
                             web.loadDataWithBaseURL(null,
                                 "<html><body style='font-family:sans-serif;padding:24px;line-height:1.6'>" +
-                                "<h2>see v3.41</h2><p>本机服务连接失败</p>" +
+                                "<h2>see v3.42</h2><p>本机服务连接失败</p>" +
                                 "<p style='color:#b02a37;font-size:13px'>" + msg + "</p>" +
                                 "<p style='font-size:12px;color:#666'>点返回键或重新打开应用重试</p></body></html>",
                                 "text/html", "utf-8", null)
@@ -274,9 +281,13 @@ class MainActivity : Activity() {
         if (savedInstanceState != null) web.restoreState(savedInstanceState)
         else {
             Thread {
-                var waited = 0
-                while (!server.wasStarted() && waited < 3000) { Thread.sleep(100); waited += 100 }
-                runOnUiThread { web.loadUrl("http://127.0.0.1:5050/") }
+                try {
+                    var waited = 0
+                    while (serverOk && !server.wasStarted() && waited < 3000) { Thread.sleep(100); waited += 100 }
+                    runOnUiThread { web.loadUrl(if (serverOk) "http://127.0.0.1:5050/" else "https://5130599.best/see/") }
+                } catch (_: Exception) {
+                    runOnUiThread { web.loadUrl("https://5130599.best/see/") }
+                }
             }.start()
         }
     }
