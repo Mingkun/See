@@ -13,7 +13,7 @@ see 采集器 —— 把「手机里的采集逻辑」搬到内网常驻设备�
 只用标准库，不装第三方包。配套 see-collector.service 可开机自启 + 崩溃自拉。
 
 用法：
-  python3 see_collector.py --api-base https://5130599.best/see --key-file /etc/see/api-key
+  python3 see_collector.py --api-base http://43.165.188.170/see --key-file /etc/see/api-key
   python3 see_collector.py --once --no-upload        # 只采一次并打印，不上传（排查用）
   python3 see_collector.py --selfcheck               # 配置/登录/解析三项自检
 """
@@ -518,7 +518,7 @@ class Collector(object):
 
 def main():
     ap = argparse.ArgumentParser(description='see 内网常驻采集器')
-    ap.add_argument('--api-base', default=os.environ.get('SEE_API', 'https://5130599.best/see'))
+    ap.add_argument('--api-base', default=os.environ.get('SEE_API', 'http://43.165.188.170/see'))
     ap.add_argument('--key', default=os.environ.get('SEE_KEY', ''))
     ap.add_argument('--key-file', default=os.environ.get('SEE_KEY_FILE', ''))
     ap.add_argument('--gateway', default='', help='覆盖配置里的网关 IP')
