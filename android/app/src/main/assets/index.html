@@ -430,11 +430,11 @@
     <div id="pwOut" class="sub mt-1"></div>
     <div class="sec">客户端下载</div>
     <div class="sub ml-0 mt-1">地址可直接长按选中复制；也可以点下面「📋 复制链接」。</div>
-    <input id="dlUrl" class="inp mt-1" style="width:100%;" readonly value="https://5130599.best/see/downloads/see-android.apk"
+    <input id="dlUrl" class="inp mt-1" style="width:100%;" readonly value="http://43.165.188.170/see/downloads/see-android.apk"
            onclick="this.select()" onfocus="this.select()">
     <div class="row mt-2">
       <button type="button" id="dlCopy" onclick="copyDlUrl()" class="btn primary">📋 复制链接</button>
-      <a href="https://5130599.best/see/downloads/see-android.apk" target="_blank" rel="noopener" style="text-decoration:none;" class="btn ghost">⬇ 打开下载</a>
+      <a href="http://43.165.188.170/see/downloads/see-android.apk" target="_blank" rel="noopener" style="text-decoration:none;" class="btn ghost">⬇ 打开下载</a>
     </div>
     <div id="dlOut" class="sub mt-1"></div>
   </div>
@@ -682,7 +682,7 @@ function loadSys(){
 function checkUpdate(){
   var o = document.getElementById('updOut');
   o.textContent = '检查中…';
-  fetch('https://5130599.best/see/downloads/see-version.json?t='+Date.now())
+  fetch('http://43.165.188.170/see/downloads/see-version.json?t='+Date.now())
     .then(function(r){ return r.json(); })
     .then(function(d){
       if(!d || !d.versionCode){ o.textContent='获取版本信息失败'; return; }
@@ -709,7 +709,7 @@ function gwProbe(){
       });
       o.innerHTML = html + '<div class="c-muted">结果已回传服务器分析</div>';
       try {
-        fetch('https://5130599.best/see/api/gw/report', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ip: ip, ver: 'probe', results: d.results }) }).catch(function(){});
+        fetch('http://43.165.188.170/see/api/gw/report', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ip: ip, ver: 'probe', results: d.results }) }).catch(function(){});
       } catch (e) {}
     })
     .catch(function(){ o.textContent = '探测请求失败'; });
@@ -751,7 +751,7 @@ function gwEnum(){
     });
     o.innerHTML = html + '<div class="c-muted">扫描完成' + (token ? '（登录成功）' : '') + '，结果已回传</div>';
     try {
-      fetch('https://5130599.best/see/api/gw/report', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ip: ip, ver:'enum3', user:user, has_token: !!token, results: steps }) }).catch(function(){});
+      fetch('http://43.165.188.170/see/api/gw/report', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ip: ip, ver:'enum3', user:user, has_token: !!token, results: steps }) }).catch(function(){});
     } catch(e) {}
   }).catch(function(){ o.textContent = '请求失败'; });
 }
@@ -794,7 +794,7 @@ function gwRemote(){
         return r0;
       });
   }
-  fetch('https://5130599.best/see/api/gw/plan', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' })
+  fetch('http://43.165.188.170/see/api/gw/plan', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' })
     .then(function(r){ return r.json(); })
     .then(function(p){
       var list = (p && p.steps) || [];
@@ -810,7 +810,7 @@ function gwRemote(){
       });
       o.innerHTML = html + '<div class="c-muted">结果已回传服务器</div>';
       try {
-        fetch('https://5130599.best/see/api/gw/report', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ip: ip, ver:'plan', user: uv, results: steps }) }).catch(function(){});
+        fetch('http://43.165.188.170/see/api/gw/report', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ip: ip, ver:'plan', user: uv, results: steps }) }).catch(function(){});
       } catch(e) {}
     })
     .catch(function(){ o.textContent = '远程探测失败（检查网络/计划）'; });
@@ -818,8 +818,8 @@ function gwRemote(){
 var GW = { ip: '192.168.1.1', user: 'useradmin', on: false, timer: null, fails: 0,
            sort: { k: 'speed', d: -1 }, last: [] };   // 默认按总速率降序（原行为）
 GW['pa' + 'ss'] = '';
-var CFG_URL = 'https://5130599.best/see/api/config';
-var API = 'https://5130599.best/see/api';
+var CFG_URL = 'http://43.165.188.170/see/api/config';
+var API = 'http://43.165.188.170/see/api';
 // 页面里不再内嵌任何密钥：改用「口令换来的会话令牌」，存在本机 localStorage。
 function sess(){ try { return localStorage.getItem('seeSess') || ''; } catch(e) { return ''; } }
 function setSess(v){ try { v ? localStorage.setItem('seeSess', v) : localStorage.removeItem('seeSess'); } catch(e) {} }
