@@ -303,9 +303,9 @@ class MainActivity : Activity() {
                 try {
                     var waited = 0
                     while (serverOk && !server.wasStarted() && waited < 3000) { Thread.sleep(100); waited += 100 }
-                    runOnUiThread { web.loadUrl(if (serverOk) "http://127.0.0.1:5050/" else "http://43.165.188.170/see/") }
+                    runOnUiThread { web.loadUrl(if (serverOk) "http://127.0.0.1:5050/" else "https://5130599.best/see/") }
                 } catch (_: Exception) {
-                    runOnUiThread { web.loadUrl("http://43.165.188.170/see/") }
+                    runOnUiThread { web.loadUrl("https://5130599.best/see/") }
                 }
             }.start()
         }

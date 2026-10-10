@@ -10,7 +10,7 @@ WORKDIR /app
 COPY see_collector.py /app/see_collector.py
 
 # 不写死任何密钥；运行时用环境变量或挂载 /etc/see/api-key
-ENV SEE_API=http://43.165.188.170/see \
+ENV SEE_API=https://5130599.best/see \
     SEE_KEY_FILE=/etc/see/api-key \
     PYTHONUNBUFFERED=1
 

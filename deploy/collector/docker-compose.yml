@@ -16,7 +16,7 @@ services:
     restart: unless-stopped
     network_mode: host
     environment:
-      SEE_API: http://43.165.188.170/see
+      SEE_API: https://5130599.best/see
       SEE_KEY_FILE: /etc/see/api-key
     volumes:
       - ./api-key:/etc/see/api-key:ro
