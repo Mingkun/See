@@ -347,8 +347,8 @@
     <div class="hint" id="lvHint">—</div>
   </div>
   <div class="panel" id="anSleepPanel" style="display:none">
-    <div class="pt">😴 轻量 + 空闲<span class="sub sub-inline" style="white-space:nowrap">（今天 · 连续 ≥10 分钟）</span></div>
-    <div class="scrollx">
+    <div class="pt" style="cursor:pointer" onclick="toggleSleepBody()"><span>😴 轻量 + 空闲<span class="sub sub-inline" style="white-space:nowrap">（今天 · 连续 ≥10 分钟）</span></span><span id="sleepArrow" style="font-size:11px;color:var(--tx-dim);transition:transform .2s">▸</span></div>
+    <div class="scrollx" id="sleepBody" style="display:none">
       <table>
         <thead><tr><th>时段</th><th>时长</th><th>类型</th><th>期间峰值</th></tr></thead>
         <tbody id="anSleepBody"><tr><td colspan="4" class="hint">—</td></tr></tbody>
@@ -539,6 +539,12 @@ function paintHourRows(){
   hb.innerHTML = rs.length ? rs.join('') : '<tr><td colspan="4" class="hint">—</td></tr>';
   var b = document.getElementById('anHourOrder');
   if (b) b.textContent = AN_HOUR_DESC ? '↑ 正序' : '↓ 倒序';
+}
+function toggleSleepBody(){
+  var b = document.getElementById('sleepBody');
+  var a = document.getElementById('sleepArrow');
+  if (b.style.display === 'none') { b.style.display = ''; a.style.transform = 'rotate(90deg)'; }
+  else { b.style.display = 'none'; a.style.transform = ''; }
 }
 function toggleHourOrder(){
   AN_HOUR_DESC = !AN_HOUR_DESC;
