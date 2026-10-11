@@ -1503,7 +1503,7 @@ function gwPaint(){
         + '<td class="sub"><span class="lkbtn' + (d.link_fixed ? ' fixed' : '')
           + '" data-k="' + escA(String(d.key || d.ip || '')) + '" onclick="gwCycleLink(this)"'
           + ' title="点按切换 无线/有线/自动">' + gwLink(d) + '</span></td>'
-        + '<td><div class="name" title="' + escA(d.name || d.ip) + '">' + (isSelf(d) ? '<span class="me">' : '') + esc(cutName(d.name || d.ip, 12)) + (isSelf(d) ? '</span>' : '') + '</div><div class="sub">' + esc(d.ip) + '</div></td>'
+        + '<td><div class="name" title="' + escA(d.name || d.ip) + '">' + (isSelf(d) ? '<span class="me">' : '') + esc(cutName(d.name || d.ip, 12)) + (isSelf(d) ? '</span>' : '') + '</div><div class="sub">' + esc(d.ip) + (d.battery !== undefined && d.battery >= 0 ? ' <span style="color:#4ade80">🔋' + d.battery + '%' + (d.charging ? '⚡' : '') + '</span>' : '') + '</div></td>'
         + '<td class="num dn">' + fmtSpeed(d.down) + '</td>'
         + '<td class="num up">' + fmtSpeed(d.up) + '</td>'
         + '<td class="sub">' + esc(gwDur(d.online_time)) + '</td></tr>';
