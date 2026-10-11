@@ -604,6 +604,22 @@ function doScan(){
   if(eb) eb.innerHTML='<div class="hint">已清空历史 · 等待新一轮动态…</div>';
   fetch('api/scan').catch(function(){}).then(function(){ setTimeout(function(){ b.textContent='🔄 立即扫描'; loadDevices(); loadEvents(); },2000); });
 }
+// 电量上报（App 内自动运行）
+var _batTimer = null;
+function _reportBattery() {
+  if (!navigator.getBattery) return;
+  navigator.getBattery().then(function(b) {
+    if (!window._devIp) return;
+    var ip = window._devIp;
+    var body = JSON.stringify({ip: ip, battery: Math.round(b.level * 100), charging: b.charging, name: navigator.userAgent.match(/\(([^)]+)\)/) ? navigator.userAgent.match(/\(([^)]+)\)/)[1].split(';')[0] : ''});
+    apiFetch(API + '/gw/battery', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: body}).catch(function(){});
+  }).catch(function(){});
+}
+if (window.SeeBridge) {
+  _reportBattery();
+  _batTimer = setInterval(_reportBattery, 300000);
+}
+
 function loadStatus(){
   if (OBS_SRC === 'collector'){
     var n0 = document.getElementById('netInfo');
@@ -680,7 +696,7 @@ document.getElementById('sysPanel').addEventListener('click', function(e){ if(e.
 function loadSys(){
   fetch('api/status').then(function(r){ return r.json(); }).then(function(d){
     if(!d||!d.ok) return;
-    document.getElementById('sysInfo').textContent = '本机 '+(d.ip||'')+' · 网段 '+(d.subnet||'')+' · :5050';
+    window._devIp = d.ip || ''; document.getElementById('sysInfo').textContent = '本机 '+(d.ip||'')+' · 网段 '+(d.subnet||'')+' · :5050';
     document.getElementById('sysVer').textContent = '当前版本 v'+(d.ver||'');
     SEE_VERCODE = d.vercode||0;
   });

@@ -966,6 +966,34 @@ def api_gw_samples():
     return jsonify(ok=True, n=n)
 
 
+@app.route('/api/gw/battery', methods=['OPTIONS', 'POST'])
+def api_gw_battery():
+    """App 上报自身电量"""
+    if request.method == 'OPTIONS':
+        return _opt('POST, OPTIONS')
+    if _auth_kind() is None:
+        return _deny()
+    try:
+        import json as _json
+        from pathlib import Path as _P
+        data = request.get_json(silent=True) or {}
+        ip = str(data.get('ip', '')).strip()
+        battery = int(data.get('battery', -1))
+        charging = bool(data.get('charging', False))
+        if not ip or battery < 0 or battery > 100:
+            return jsonify(ok=False, error='参数错误'), 400
+        bp = _P(__file__).resolve().parent.parent / 'data' / 'battery.json'
+        store = {}
+        try:
+            store = _json.loads(bp.read_text(encoding='utf-8'))
+        except Exception:
+            pass
+        store[ip] = {'battery': battery, 'charging': charging, 'ts': int(time.time()), 'name': str(data.get('name', ''))}
+        bp.write_text(_json.dumps(store, ensure_ascii=False), encoding='utf-8')
+        return jsonify(ok=True)
+    except Exception as e:
+        return jsonify(ok=False, error=str(e)[:120]), 500
+
 @app.route('/api/gw/devices', methods=['OPTIONS', 'GET'])
 def api_gw_devices():
     """监控页数据源：采集器最近一轮的设备快照。
@@ -996,6 +1024,19 @@ def api_gw_devices():
         for d in devs:
             if d.get('key') in nm_ov:
                 d['name'] = nm_ov[d['key']]
+    try:
+        import json as _json
+        from pathlib import Path as _P
+        bp = _P(__file__).resolve().parent.parent / 'data' / 'battery.json'
+        bat = _json.loads(bp.read_text(encoding='utf-8')) if bp.exists() else {}
+        now = int(time.time())
+        for d in devs:
+            b = bat.get(d.get('ip', ''))
+            if b and now - b.get('ts', 0) < 1800:
+                d['battery'] = b.get('battery', -1)
+                d['charging'] = b.get('charging', False)
+    except Exception:
+        pass
     try:
         links = store.gw_last_link()
     except Exception:  # noqa: BLE001
