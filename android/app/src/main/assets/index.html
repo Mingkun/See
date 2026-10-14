@@ -282,6 +282,16 @@
     <div class="topo-wrap"><svg id="topoSvg" class="topo-svg" viewBox="0 0 340 40"></svg></div>
     <div class="hint" id="topoHint"></div>
   </div>
+  <div class="panel">
+    <div class="pt"><span>📊 分时用量（5 分钟一格）</span><button type="button" class="btn sm" id="anHourMore" onclick="toggleHourFull()" style="display:none">⬇ 展开</button><button type="button" class="btn sm" id="anHourOrder" onclick="toggleHourOrder()">↓ 倒序</button></div>
+    <div class="scrollx">
+      <table id="anHourTbl">
+        <thead><tr><th>时段</th><th>平均速率</th><th>峰值</th><th>状态</th></tr></thead>
+        <tbody id="anHourBody"><tr><td colspan="4" class="hint">—</td></tr></tbody>
+      </table>
+    </div>
+    <div class="hint" id="anHint"></div>
+  </div>
   <div class="panel" id="gwPanel">
     <div class="pt"><span>网关设备</span><span class="sub" id="gwSum"></span></div>
     <div class="scrollx">
@@ -354,16 +364,6 @@
         <tbody id="anSleepBody"><tr><td colspan="4" class="hint">—</td></tr></tbody>
       </table>
     </div>
-  </div>
-  <div class="panel">
-    <div class="pt"><span>📊 分时用量（5 分钟一格）</span><button type="button" class="btn sm" id="anHourOrder" onclick="toggleHourOrder()">↓ 倒序</button></div>
-    <div class="scrollx">
-      <table id="anHourTbl">
-        <thead><tr><th>时段</th><th>平均速率</th><th>峰值</th><th>状态</th></tr></thead>
-        <tbody id="anHourBody"><tr><td colspan="4" class="hint">—</td></tr></tbody>
-      </table>
-    </div>
-    <div class="hint" id="anHint"></div>
   </div>
 </div>
 
@@ -458,6 +458,7 @@ function seeTab(w){
   if (w==='obs') loadStatus();
   if (w==='an') { anInit(); anLiveStart(); } else { anLiveStop(); }
 }
+seeTab('mon');   // 打开缺省显示监控页（防WebView恢复上次DOM状态停在别的标签）
 </script>
 <div id="detail" class="modal" style="display:none">
   <div class="mbox wide">
@@ -522,6 +523,7 @@ function loadPrefs(){
     if (j && j.ok && j.prefs){
       UI_PREFS = j.prefs;
       AN_HOUR_DESC = !!UI_PREFS.hour_desc;
+      AN_HOUR_FULL = !!UI_PREFS.hour_full;
       OBS_SRC = (UI_PREFS.obsSrc === 'local') ? 'local' : 'collector';
       obsSrcApply();
       paintHourRows();
@@ -533,12 +535,22 @@ function savePref(k, v){
   apiFetch(API + '/prefs', { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ key: k, value: v }) }).catch(function(){});
 }
+var AN_HOUR_FULL = false;   // 缺省只显示最近20分钟（5分钟一格×4），点「展开」看全部
 function paintHourRows(){
   var hb = document.getElementById('anHourBody'); if (!hb) return;
-  var rs = AN_HOUR_DESC ? AN_HOUR_ASC.slice().reverse() : AN_HOUR_ASC;
+  var base = AN_HOUR_ASC;
+  if (!AN_HOUR_FULL && base.length > 4) base = base.slice(base.length - 4);
+  var rs = AN_HOUR_DESC ? base.slice().reverse() : base;
   hb.innerHTML = rs.length ? rs.join('') : '<tr><td colspan="4" class="hint">—</td></tr>';
   var b = document.getElementById('anHourOrder');
   if (b) b.textContent = AN_HOUR_DESC ? '↑ 正序' : '↓ 倒序';
+  var mb = document.getElementById('anHourMore');
+  if (mb) { mb.style.display = AN_HOUR_ASC.length > 4 ? '' : 'none'; mb.textContent = AN_HOUR_FULL ? '⬆ 收起' : ('⬇ 展开 ' + AN_HOUR_ASC.length + ' 行'); }
+}
+function toggleHourFull(){
+  AN_HOUR_FULL = !AN_HOUR_FULL;
+  paintHourRows();
+  savePref('hour_full', AN_HOUR_FULL);
 }
 function toggleSleepBody(){
   var b = document.getElementById('sleepBody');
