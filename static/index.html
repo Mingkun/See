@@ -458,6 +458,7 @@ function seeTab(w){
   if (w==='obs') loadStatus();
   if (w==='an') { anInit(); anLiveStart(); } else { anLiveStop(); }
 }
+seeTab('mon');   // 打开缺省显示监控页（防WebView恢复上次DOM状态停在别的标签）
 </script>
 <div id="detail" class="modal" style="display:none">
   <div class="mbox wide">
