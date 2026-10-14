@@ -282,16 +282,6 @@
     <div class="topo-wrap"><svg id="topoSvg" class="topo-svg" viewBox="0 0 340 40"></svg></div>
     <div class="hint" id="topoHint"></div>
   </div>
-  <div class="panel">
-    <div class="pt"><span>📊 分时用量（5 分钟一格）</span><button type="button" class="btn sm" id="anHourMore" onclick="toggleHourFull()" style="display:none">⬇ 展开</button><button type="button" class="btn sm" id="anHourOrder" onclick="toggleHourOrder()">↓ 倒序</button></div>
-    <div class="scrollx">
-      <table id="anHourTbl">
-        <thead><tr><th>时段</th><th>平均速率</th><th>峰值</th><th>状态</th></tr></thead>
-        <tbody id="anHourBody"><tr><td colspan="4" class="hint">—</td></tr></tbody>
-      </table>
-    </div>
-    <div class="hint" id="anHint"></div>
-  </div>
   <div class="panel" id="gwPanel">
     <div class="pt"><span>网关设备</span><span class="sub" id="gwSum"></span></div>
     <div class="scrollx">
@@ -336,6 +326,16 @@
     </div>
     <div class="pbody mt-1"><svg id="anChart" class="chart-svg"></svg></div>
     <div class="sub legend" id="anLeg3"><span class="c-busy">▬</span> 繁忙 · <span class="c-chill">▬</span> 轻量 · <span class="c-idle">▬</span> 空闲 · <span class="c-muted">▬</span> 无数据<br>繁忙:<span id="anDurBusy"></span>，轻量:<span id="anDurChill"></span><br>空闲:<span id="anDurIdle"></span>，无数据:<span id="anDurNone"></span></div>
+  </div>
+  <div class="panel">
+    <div class="pt"><span>📊 分时用量（5 分钟一格）</span><button type="button" class="btn sm" id="anHourMore" onclick="toggleHourFull()" style="display:none">⬇ 展开</button><button type="button" class="btn sm" id="anHourOrder" onclick="toggleHourOrder()">↓ 倒序</button></div>
+    <div class="scrollx">
+      <table id="anHourTbl">
+        <thead><tr><th>时段</th><th>平均速率</th><th>峰值</th><th>状态</th></tr></thead>
+        <tbody id="anHourBody"><tr><td colspan="4" class="hint">—</td></tr></tbody>
+      </table>
+    </div>
+    <div class="hint" id="anHint"></div>
   </div>
   <div class="panel" id="anLivePanel">
     <div class="pt"><span>⚡ 实时<span class="sub sub-inline" id="anLiveDev">选定终端</span></span><span class="sub" id="anLiveAge">—</span></div>
@@ -458,7 +458,7 @@ function seeTab(w){
   if (w==='obs') loadStatus();
   if (w==='an') { anInit(); anLiveStart(); } else { anLiveStop(); }
 }
-seeTab('mon');   // 打开缺省显示监控页（防WebView恢复上次DOM状态停在别的标签）
+seeTab('an');    // 打开缺省显示分析页（防WebView恢复上次DOM状态停在别的标签）
 </script>
 <div id="detail" class="modal" style="display:none">
   <div class="mbox wide">
