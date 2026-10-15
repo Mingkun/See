@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>see · 局域网监控</title>
 <style>
+button, button *, .btn, .btn *, .tab, .tab * { -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
   /* ===== 设计系统：字号 5 级 + 间距/圆角统一 ===== */
   :root{
     --fs-xs:10px;    /* 角标、代码 */
@@ -2197,5 +2198,6 @@ checkSession().then(function(){ boot(); });
     <div class="lgfoot" id="loginFoot"></div>
   </div>
 </div>
+<script>document.addEventListener('contextmenu',function(e){if(e.target.closest&&e.target.closest('button,.btn,.tab'))e.preventDefault();});</script>
 </body>
 </html>
