@@ -1064,7 +1064,13 @@ def api_gw_devices():
         'wldown': sum(d['down'] for d in wireless), 'wlup': sum(d['up'] for d in wireless),
         'wired': len(wired), 'wireless': len(wireless),
     }
-    return jsonify(ok=True, ts=now, age=age, src='collector', devices=devs, totals=totals)
+    try:
+        last_ts = store.gw_last_ts()
+    except Exception:  # noqa: BLE001
+        last_ts = 0
+    last_age = (now - last_ts) if last_ts else -1
+    return jsonify(ok=True, ts=now, age=age, last_sample_ts=last_ts,
+                   last_sample_age=last_age, src='collector', devices=devs, totals=totals)
 
 
 @app.route('/api/gw/link', methods=['OPTIONS', 'POST'])
