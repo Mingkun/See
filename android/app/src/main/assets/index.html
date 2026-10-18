@@ -652,7 +652,14 @@ function loadDevices(){
     var enrich = (OBS_SRC === 'local' && d.devices && d.devices.length) ? obsVendorEnrich(d.devices) : Promise.resolve();
     return enrich.then(function(){
     var b=document.getElementById('devBody');
-    if(!d.devices.length){ b.innerHTML='<tr><td colspan="5" class="hint">暂未发现设备 · 采集器模式下等微服上报（约 60 秒一轮）；本机模式需在 App 内点「立即扫描」</td></tr>'; return; }
+    if(!d.devices.length){
+      var hintText = '暂未发现设备 · 采集器模式下等微服上报（约 60 秒一轮）；本机模式需在 App 内点「立即扫描」';
+      if(d.last_sample_ts > 0 && d.last_sample_age > 900){
+        var hz = Math.floor(d.last_sample_age/3600), mz = Math.floor((d.last_sample_age%3600)/60);
+        hintText = '⚠️ 采集器已掉线 ' + (hz>0 ? hz+' 小时 ' : '') + mz + ' 分钟（最后数据 ' + fmtTs(d.last_sample_ts) + '）· 请检查家里微服的 see-collector 服务';
+      }
+      b.innerHTML='<tr><td colspan="5" class="hint">'+esc(hintText)+'</td></tr>'; return;
+    }
     var html='';
     pinSel(d.devices);
     d.devices.forEach(function(v){
@@ -1572,7 +1579,7 @@ function pinSel(list){
   }
   return list;
 }
-var AN_WINS = [[24, '近 24 小时'], [12, '近 12 小时'], [6, '近 6 小时']];
+var AN_WINS = [[72, '近 72 小时'], [48, '近 48 小时'], [36, '近 36 小时'], [24, '近 24 小时'], [12, '近 12 小时'], [6, '近 6 小时']];
 function ddCloseAll(){
   var xs = document.querySelectorAll('.dd.open');
   for (var i = 0; i < xs.length; i++) xs[i].classList.remove('open');
