@@ -179,8 +179,11 @@ class Store:
 
     def gw_keys(self, since):
         with self._lock:
+            # name/ip/present 取「最新一条采样」（SQLite 裸列 + MAX(ts) 语义）。
+            # 不能用 MAX(name)：设备改过名后（如「苹果手机」→「iPhone 16 Pro」），
+            # 字典序会选中旧名，把同一台设备分到旧名分组，默认合并因此失效。
             return [dict(r) for r in self._db.execute(
-                'SELECT devkey AS key, MAX(name) name, MAX(ip) ip, MAX(ts) last_ts'
+                'SELECT devkey AS key, name, ip, present, MAX(ts) last_ts'
                 ' FROM gw_samples WHERE ts>=? GROUP BY devkey ORDER BY last_ts DESC', (int(since),))]
 
     def gw_series(self, devkey, frm, to):

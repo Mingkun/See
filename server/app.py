@@ -407,7 +407,7 @@ def _merge_map():
     for ks in groups.values():
         if len(ks) < 2:
             continue
-        ks = sorted(ks, key=lambda x: -x.get('last_ts', 0))
+        ks = sorted(ks, key=lambda x: (-(x.get('last_ts') or 0), -int(x.get('present') or 0)))
         canon = ks[0]['key']
         for k in ks[1:]:
             if k['key'] not in splits:
@@ -1016,7 +1016,7 @@ def api_gw_devices():
             kk = m.get(d['key'], d['key'])
             d['key'] = kk
             o = by.get(kk)
-            if o is None or d['ts'] > o['ts']:
+            if o is None or d['ts'] > o['ts'] or (d['ts'] == o['ts'] and d.get('present') and not o.get('present')):
                 by[kk] = d
         devs = sorted(by.values(), key=lambda d: -d['ts'])
     nm_ov = _load_names()
@@ -1248,7 +1248,7 @@ def api_gw_merge():
     for nm, ks in groups.items():
         if len(ks) < 2:
             continue
-        ks = sorted(ks, key=lambda x: -x.get('last_ts', 0))
+        ks = sorted(ks, key=lambda x: (-(x.get('last_ts') or 0), -int(x.get('present') or 0)))
         items = [{'key': k['key'], 'ip': k.get('ip') or k['key'],
                   'last_ts': int(k.get('last_ts') or 0),
                   'active': int(k.get('last_ts') or 0) >= now - 1800,
