@@ -965,11 +965,11 @@ def api_gw_samples():
     data = request.get_json(force=True, silent=True) or {}
     rows = data.get('samples') or []
     n = store.add_gw_samples(rows[:2000])
-    # 顺带清理 30 天前的采样
+    # 顺带清理：只保留最近 24 小时采样（控制数据量；分析窗 anWin=24 与此对齐）
     try:
         if time.time() - _LAST_PRUNE[0] > 3600:
             _LAST_PRUNE[0] = time.time()
-            store.prune_gw_samples(int(time.time()) - 30 * 86400)
+            store.prune_gw_samples(int(time.time()) - 86400)
     except Exception:  # noqa: BLE001
         pass
     return jsonify(ok=True, n=n)
