@@ -329,7 +329,7 @@ button, button *, .btn, .btn *, .tab, .tab * { -webkit-user-select:none; user-se
     <div class="sub legend" id="anLeg3"><span class="c-busy">▬</span> 繁忙 · <span class="c-chill">▬</span> 轻量 · <span class="c-idle">▬</span> 空闲 · <span class="c-muted">▬</span> 无数据<br>繁忙:<span id="anDurBusy"></span>，轻量:<span id="anDurChill"></span><br>空闲:<span id="anDurIdle"></span>，无数据:<span id="anDurNone"></span></div>
   </div>
   <div class="panel">
-    <div class="pt"><span>📊 分时用量（5 分钟一格）</span><button type="button" class="btn sm" id="anHourMore" onclick="toggleHourFull()" style="display:none">⬇ 展开</button><button type="button" class="btn sm" id="anHourOrder" onclick="toggleHourOrder()">↓ 倒序</button></div>
+    <div class="pt"><span>📊 分时用量（每分钟一格）</span><button type="button" class="btn sm" id="anHourMore" onclick="toggleHourFull()" style="display:none">⬇ 展开</button><button type="button" class="btn sm" id="anHourOrder" onclick="toggleHourOrder()">↓ 倒序</button></div>
     <div class="scrollx">
       <table id="anHourTbl">
         <thead><tr><th>时段</th><th>平均速率</th><th>峰值</th><th>状态</th></tr></thead>
@@ -536,11 +536,11 @@ function savePref(k, v){
   apiFetch(API + '/prefs', { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ key: k, value: v }) }).catch(function(){});
 }
-var AN_HOUR_FULL = false;   // 缺省只显示最近20分钟（5分钟一格×4），点「展开」看全部
+var AN_HOUR_FULL = false;   // 缺省只显示最近20分钟（每分钟一格×20），点「展开」看全部
 function paintHourRows(){
   var hb = document.getElementById('anHourBody'); if (!hb) return;
   var base = AN_HOUR_ASC;
-  if (!AN_HOUR_FULL && base.length > 4) base = base.slice(base.length - 4);
+  if (!AN_HOUR_FULL && base.length > 20) base = base.slice(base.length - 20);
   var rs = AN_HOUR_DESC ? base.slice().reverse() : base;
   hb.innerHTML = rs.length ? rs.join('') : '<tr><td colspan="4" class="hint">—</td></tr>';
   var b = document.getElementById('anHourOrder');
@@ -1936,24 +1936,24 @@ function anRender(j){
   }
   document.getElementById('anSleepPanel').style.display = '';
   var rows = [];
-  var nh = Math.floor(n / 5);   // 与柱状图一致：5 分钟一格
+  var nh = n;   // 每分钟一格（1 分钟采样下与样本一一对应）
   var today = anDayLbl(j.now || Math.floor(Date.now() / 1000));
-  // 还没到的时段不提前列出来：只到「此刻所在的 5 分钟」为止（与柱状图闪动的那格同一索引）
-  var lastH = (j.now && j.now >= from) ? Math.floor((j.now - from) / 300) : nh - 1;
+  // 还没到的时段不提前列出来：只到「此刻所在的 1 分钟」为止
+  var lastH = (j.now && j.now >= from) ? Math.floor((j.now - from) / 60) : nh - 1;
   if (lastH > nh - 1) lastH = nh - 1;
   for (var h3 = 0; h3 <= lastH; h3++){
-    var kEnd = Math.min((h3 + 1) * 5, n);
+    var kEnd = Math.min(h3 + 1, n);
     var tot = 0, mx = 0, ct2 = 0, any2 = 0, pr2 = 0;
-    for (var k2 = h3 * 5; k2 < kEnd; k2++){ if (hs[k2]) any2 = 1; if (pr[k2]) pr2 = 1; tot += sp[k2]; if (sp[k2] > mx) mx = sp[k2]; ct2++; }
+    for (var k2 = h3; k2 < kEnd; k2++){ if (hs[k2]) any2 = 1; if (pr[k2]) pr2 = 1; tot += sp[k2]; if (sp[k2] > mx) mx = sp[k2]; ct2++; }
     var st;
     if (!any2) st = '<span class="sub">无</span>';
     else if (mx >= AN_BUSY) st = '<span class="c-busy">繁忙</span>';
     else if (mx > 0) st = '<span class="c-chill">轻量</span>';
     else st = '<span class="c-idle">空闲</span>';
-    var t0 = from + h3 * 300, t1 = t0 + 300;
+    var t0 = from + h3 * 60, t1 = t0 + 60;
     // 行序即时间先后（由早到晚，索引 0 为窗口起点）
     var hlbl = anHMin(t0) + '–' + anHMin(t1);
-    var cur = j.now && t1 > j.now;   // 覆盖 now 的那一格 = 当前 5 分钟（与柱状图闪动的那根同格）
+    var cur = j.now && t1 > j.now;   // 覆盖 now 的那一格 = 当前 1 分钟
     // 底色按自然日区分；不写日期文字
     var rcls = (cur || anDayLbl(t0) === today) ? 'today' : 'prev';
     rows.push('<tr class="' + rcls + '"><td class="num' + (cur ? ' curhour' : '') + '">' + hlbl + '</td><td class="num">' + fmtSpeed(tot / ct2) + '</td><td class="num">' + fmtSpeed(mx) + '</td><td>' + st + '</td></tr>');
@@ -1971,7 +1971,7 @@ function anRender(j){
   document.getElementById('anDurChill').textContent = anDur2(durMin.chill);
   document.getElementById('anDurIdle').textContent = anDur2(durMin.idle);
   document.getElementById('anDurNone').textContent = anDur2(durMin.none);
-  document.getElementById('anHint').textContent = '数据来自 app 运行期间对网关的采样（每 10 秒 1 次），app 关闭期间不采集；柱高为 5 分钟一格的合计速率峰值。';
+  document.getElementById('anHint').textContent = '数据来自内网采集器的采样（每分钟 1 次，7×24 常驻）；柱状图为 5 分钟一格合计速率峰值，分时表为每分钟一格。';
 }
 
 /* ===== 柱状图：双击进全屏（横屏）+ 点选时间点看数据 ===== */

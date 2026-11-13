@@ -1,1 +1,1 @@
-{"versionCode": 167, "versionName": "3.56", "size": 2126614, "md5": "2fda48ba155fe38ee7f64ec8f91f04e0", "note": "分析窗口同步24小时保留期：时间窗裁剪为24/12/6小时（72/48/36已无数据）", "apkUrl": "https://5130599.best/see/downloads/see-android.apk"}
+{"versionCode": 168, "versionName": "3.57", "size": 2126598, "md5": "ac0528f6f828b2bca12aa97c1fae7ac9", "note": "分时用量表改每分钟一格（配合1分钟采样）：默认显示最近20分钟，展开看全天1440行", "apkUrl": "https://5130599.best/see/downloads/see-android.apk"}
