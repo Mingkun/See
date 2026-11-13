@@ -164,7 +164,7 @@ button, button *, .btn, .btn *, .tab, .tab * { -webkit-user-select:none; user-se
   .ddopt:active { background:#f6f8fb; }
   /* 分时用量：今天的行黑字白底、昨天的行黑字灰底；当前小时红字闪动、白底 */
   /* 状态列只有 2 字，固定不换行，手机窄屏也挤在一行 */
-  /* 分时用量改为 5 分钟一格后行数变多：本表专用紧凑行高（约为普通表一半），字号降一档 */
+  /* 分时用量为每分钟一格：本表专用紧凑行高（约为普通表一半），字号降一档 */
   #anHourTbl td { padding:3px 8px; font-size:var(--fs-md); line-height:1.25; }
   #anHourTbl th { padding:5px 8px; font-size:var(--fs-xs); }
   #anHourBody td:last-child { white-space:nowrap; }
@@ -1827,7 +1827,7 @@ function anRender(j){
   svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
   var padL = 34, padR = 6, padT = 10, padB = 18;
   var iw = W - padL - padR, ih = H - padT - padB;
-  var G = 5, groups = Math.ceil(n / G);
+  var G = 1, groups = n;   // 每分钟一格（与 1 分钟采样对应；轻量时段阈值按分钟算不受影响）
   var PKTH = AN_BUSY;   // 「合计峰值」阈值：既判柱色，也是那条虚线的位置
   // 横轴跟随所选窗口（24/12/6 小时），此前写死 0–24、步长 4
   var HRS = Math.max(1, Math.round(n / 60));
@@ -1850,7 +1850,7 @@ function anRender(j){
   p.push('<text x="4" y="' + (padT + 8) + '" font-size="8" fill="#9aa4b2">' + fmtSpeed(maxV) + '</text>');
   var bw = iw / groups, bars = [];
   var tiers = [], gpks = [];   // 每格档位/峰值，给「轻量+空闲」时段用（与分时用量同口径）
-  var durMin = { busy: 0, chill: 0, idle: 0, none: 0 };   // 窗口内各状态累计时长（分钟），只累到当前所在的 5 分钟
+  var durMin = { busy: 0, chill: 0, idle: 0, none: 0 };   // 窗口内各状态累计时长（分钟），只累到当前所在的 1 分钟
   var nowSec = j.now || Math.floor(Date.now() / 1000);
   // 当前时段 = 覆盖 now 的那一格（与分时用量表的 .curhour 同一格），整柱缓慢闪动标识
   var curG = (nowSec >= from && nowSec < from + n * 60) ? Math.floor((nowSec - from) / (G * 60)) : -1;
@@ -1894,8 +1894,8 @@ function anRender(j){
   svg.__bars = bars;
   svg.innerHTML = p.join('');
   chartTipSync(svg);
-  // 「轻量 + 空闲」时段：与「分时用量」完全同一套口径 —— 5 分钟一格、按该格峰值
-  // 分档（空闲=整格零流量、轻量=有流量但峰值 <AN_BUSY），连续 ≥10 分钟（2 格）才算。
+  // 「轻量 + 空闲」时段：与「分时用量」完全同一套口径 —— 每分钟一格、按该格峰值
+  // 分档（空闲=整格零流量、轻量=有流量但峰值 <AN_BUSY），连续 ≥10 分钟（10 格）才算。
   // 老逻辑按「分钟均速 <4KB/s」切，跟峰值口径对不上，已废弃（AN_THR 一并删除）。
   var runs = [];
   var i2 = 0;
@@ -1971,7 +1971,7 @@ function anRender(j){
   document.getElementById('anDurChill').textContent = anDur2(durMin.chill);
   document.getElementById('anDurIdle').textContent = anDur2(durMin.idle);
   document.getElementById('anDurNone').textContent = anDur2(durMin.none);
-  document.getElementById('anHint').textContent = '数据来自内网采集器的采样（每分钟 1 次，7×24 常驻）；柱状图为 5 分钟一格合计速率峰值，分时表为每分钟一格。';
+  document.getElementById('anHint').textContent = '数据来自内网采集器的采样（每分钟 1 次，7×24 常驻）；柱状图与分时表均为每分钟一格（柱高=该分钟合计速率峰值）。';
 }
 
 /* ===== 柱状图：双击进全屏（横屏）+ 点选时间点看数据 ===== */
