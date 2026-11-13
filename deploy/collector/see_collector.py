@@ -199,7 +199,9 @@ class Collector(object):
             return False
         self.cfg = {'ip': j.get('ip') or '', 'user': j.get('user') or '',
                     'on': bool(j.get('on')), 'anDev': j.get('anDev') or '',
-                    'anWin': j.get('anWin') or 24}
+                    'anWin': j.get('anWin') or 24,
+                    'sampleEvery': j.get('sampleEvery') or 0,
+                    'uploadEvery': j.get('uploadEvery') or 0}
         self.cfg['pa' + 'ss'] = j.get('pa' + 'ss') or ''
         self.cfg_ts = time.time()
         return True
@@ -497,7 +499,8 @@ class Collector(object):
                         log('采集开关关闭（等待开启，每 %ds 对一次开关）' % cfg_every)
                     time.sleep(5)
                     continue
-                if time.time() - last_up >= upload_every:
+                # 采样/上传间隔可由服务器配置下发（sampleEvery/uploadEvery，0=沿用启动参数）
+                if time.time() - last_up >= (int(self.cfg.get('uploadEvery') or 0) or upload_every):
                     last_up = time.time()
                     n = self.flush()
                     # 上传间隔跟着采样间隔（默认 10s）后，这条日志会每 10 秒一行，
@@ -513,7 +516,7 @@ class Collector(object):
             except Exception as e:  # noqa: BLE001
                 log('循环异常（忽略并继续）：%s' % e)
                 time.sleep(5)
-            time.sleep(interval)
+            time.sleep(int(self.cfg.get('sampleEvery') or 0) or interval)
 
 
 def main():

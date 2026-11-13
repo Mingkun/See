@@ -910,6 +910,15 @@ def api_config():
     for k in ('ip', 'user', 'on', 'anDev', 'anWin'):
         if k in data:
             cfg[k] = bool(data[k]) if k == 'on' else data[k]
+    # 采集节奏（秒）：采样/上传间隔由服务器下发，采集器整配置拉取（≤5分钟）后生效
+    for k in ('sampleEvery', 'uploadEvery'):
+        if k in data:
+            try:
+                v = int(data[k])
+            except Exception:  # noqa: BLE001
+                v = 0
+            if 10 <= v <= 86400:
+                cfg[k] = v
     # offMin：暂停多少分钟后自动恢复（0 或没传 = 一直停到手动恢复）
     try:
         off_min = int(data.get('offMin') or 0)
@@ -1176,7 +1185,9 @@ def api_gw_cred():
     cfg = _load_gwcfg()
     return jsonify(ok=True, ip=cfg.get('ip') or '', user=cfg.get('user') or '',
                    **{'pass': cfg.get('pass') or ''}, on=_eff_on(cfg),
-                   anDev=cfg.get('anDev') or '', anWin=cfg.get('anWin') or 24)
+                   anDev=cfg.get('anDev') or '', anWin=cfg.get('anWin') or 24,
+                   sampleEvery=cfg.get('sampleEvery') or 0,
+                   uploadEvery=cfg.get('uploadEvery') or 0)
 
 
 @app.route('/api/gw/on', methods=['OPTIONS', 'GET'])
