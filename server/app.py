@@ -1448,6 +1448,77 @@ def api_gw_series():
                    peak1=peak1)
 
 
+def _ug_med(a):
+    s = sorted(a)
+    m2 = len(s) // 2
+    return s[m2] if len(s) % 2 else (s[m2 - 1] + s[m2]) / 2
+
+
+@app.route('/api/gw/usegrid', methods=['OPTIONS', 'GET'])
+def api_gw_usegrid():
+    """分析页「使用时间线」：多设备 × 10 分钟桶的判定依据指标。
+
+    每桶只统计 present=1 的采样，指标口径与前端场景分析（anSceneCalc）完全一致：
+    上行小包=0.5–15K 的上行采样个数、静默=合计<2K 占比、中位数、变异系数、合计字节。
+    「是否有人使用」的判定在前端 ugVerdict（阈值同 anSceneVerdict）。
+    桶只到最近一个完整的 10 分钟边界，当前未走完的桶不显示。
+    """
+    if request.method == 'OPTIONS':
+        return _opt('GET, OPTIONS')
+    if _auth_kind() is None:
+        return _deny()
+    devs = [d.strip() for d in (request.args.get('devs') or '').split(',') if d.strip()]
+    try:
+        hours = max(1, min(int(request.args.get('hours', 24)), 24))
+    except Exception:  # noqa: BLE001
+        hours = 24
+    if not devs:
+        return jsonify(ok=False, error='未指定设备'), 400
+    devs = devs[:8]
+    now = int(time.time())
+    end = (now // 600) * 600
+    frm = end - hours * 3600
+    nb = hours * 6
+    m = _merge_map()
+    keys = store.gw_keys(frm)
+    names = {k['key']: (k.get('name') or '') for k in keys}
+    ips = {k['key']: (k.get('ip') or '') for k in keys}
+    ov = _load_names()
+    out = []
+    for key in devs:
+        ups = [[] for _ in range(nb)]
+        dns = [[] for _ in range(nb)]
+        for r in _merge_rows(m, key, frm, end):
+            if not r.get('present'):
+                continue
+            b = (int(r['ts']) - frm) // 600
+            if b < 0 or b >= nb:
+                continue
+            ups[b].append(float(r['up'] or 0))
+            dns[b].append(float(r['down'] or 0))
+        bk = []
+        for i in range(nb):
+            us, ds = ups[i], dns[i]
+            if not us:
+                bk.append(None)
+                continue
+            n = len(us)
+            tot = [u + d for u, d in zip(us, ds)]
+            mt = sum(us) / n + sum(ds) / n
+            med_u = _ug_med(us)
+            med_d = _ug_med(ds)
+            q = sum(1 for x in tot if x < 2048) / n
+            var = sum((x - mt) ** 2 for x in tot) / n
+            cv = (var ** 0.5 / mt) if mt > 0 else 0.0
+            upsmall = sum(1 for u in us if 512 < u < 15360)
+            ratio = (med_u / med_d) if med_d > 1 else (99.0 if med_u > 1 else 1.0)
+            bk.append([n, round(med_u), round(med_d), round(ratio, 2), round(q, 2),
+                       round(cv, 2), upsmall, round(mt * 10 * n), round(mt)])
+        out.append({'key': key, 'name': ov.get(key, names.get(key, '')),
+                    'ip': ips.get(key, ''), 'bk': bk})
+    return jsonify(ok=True, frm=frm, now=now, step=600, nb=nb, hours=hours, devs=out)
+
+
 @app.route('/api/gw/live', methods=['OPTIONS', 'GET'])
 def api_gw_live():
     """分析页「实时」卡片：选定终端最近几分钟的逐条采样（上/下行分开）。

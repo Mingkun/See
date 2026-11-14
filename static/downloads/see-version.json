@@ -1,1 +1,1 @@
-{"versionCode":185,"versionName":"3.74","size":2131294,"md5":"18fb12bdd305bbbe2615dff19de5576f","note":"场景分析新增「操作判定」（人在使用/间歇拿起/前台活跃/无交互/无人操作，靠上行小包识别）；码率判断改用中位数，单次下载尖峰不再误判成视频","apkUrl":"https://5130599.best/see/downloads/see-android.apk"}
+{"versionCode":186,"versionName":"3.75","size":2134370,"md5":"7f38d1f34ca88383c7c93279fd89c44b","note":"分析页新增「使用时间线」卡片：多选设备 × 近6/12/24小时，每10分钟一个点（有人使用=彩点、无人=灰点），点小点看判定依据","apkUrl":"https://5130599.best/see/downloads/see-android.apk"}

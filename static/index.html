@@ -231,6 +231,11 @@ button, button *, .btn, .btn *, .tab, .tab * { -webkit-user-select:none; user-se
   .scn-val { font-size:var(--fs-md); font-weight:650; white-space:nowrap; }
   .scn-ev { font-size:var(--fs-sm); color:var(--muted); margin-top:4px; line-height:1.5; }
   .scn-num { font-variant-numeric:tabular-nums; }
+  /* 使用时间线：多设备 × 10 分钟点阵 */
+  .ugopt { display:flex; align-items:center; }
+  .ugchk { color:var(--brand); flex:none; margin-right:6px; font-size:var(--fs-md); }
+  #ugDevPop { max-height:262px; overflow-y:auto; }
+  #ugDetail { padding-top:0; }
   #lvHint { text-align:center; }
   .chart { display:flex; align-items:flex-end; gap:1px; height:70px; margin:8px 0 2px; }
   .chart .b { flex:1; background:#bfdbfe; border-radius:1px 1px 0 0; position:relative; }
@@ -318,6 +323,22 @@ button, button *, .btn, .btn *, .tab, .tab * { -webkit-user-select:none; user-se
   </div>
 
 <div id="viewAn" style="display:none">
+  <div class="panel" id="ugPanel">
+    <div class="pt"><span>🕐 使用时间线</span><span class="sub" id="ugSub">每 10 分钟一点</span></div>
+    <div class="pbody row">
+      <div class="dd grow" id="ugDevDD">
+        <button type="button" class="ddbtn" onclick="ddToggle(event,'ugDevDD')"><span class="ddlab" id="ugDevLab">选择设备…</span><span class="ddcar">▾</span></button>
+        <div class="ddpop" id="ugDevPop" onclick="event.stopPropagation()"></div>
+      </div>
+      <div class="dd" id="ugWinDD" style="width:92px;flex:none">
+        <button type="button" class="ddbtn" onclick="ddToggle(event,'ugWinDD')"><span class="ddlab" id="ugWinLab">近 24 小时</span><span class="ddcar">▾</span></button>
+        <div class="ddpop" id="ugWinPop" onclick="event.stopPropagation()"></div>
+      </div>
+      <button type="button" onclick="ugLoad()" class="btn">刷新</button>
+    </div>
+    <div class="pbody mt-1"><svg id="ugChart" class="chart-svg"></svg></div>
+    <div class="hint" id="ugDetail">点图中小点查看该 10 分钟的判定依据 · <span class="c-muted">彩=有人使用 灰=无人/自动 浅=无数据</span></div>
+  </div>
   <div class="panel">
     <div class="pt"><span>📈 流量负载分析</span><span class="sub" id="anSub"></span></div>
     <div class="pbody row">
@@ -1754,6 +1775,7 @@ function anKeys(){
         anDevItems();
         anLiveStop(); anLiveReset();
         document.getElementById('anSub').textContent = '还没有采样数据 · 查微服采集器是否在跑';
+        ugMsg('还没有采样数据');
         return;
       }
       ks.sort(function(a, b){ return String(a.name || a.ip).localeCompare(String(b.name || b.ip)); });
@@ -1764,6 +1786,7 @@ function anKeys(){
       AN.key = cur.key;
       if (lab) lab.innerHTML = anDevLabelHtml(cur);
       anDevItems();
+      ugInit();
       anLoad();
     }).catch(function(){ document.getElementById('anSub').textContent = '服务器设备列表读取失败'; });
 }
@@ -1986,6 +2009,164 @@ function anSceneRender(j){
       ' · 合计约 ' + fmtBytes(s.bytes) + '</span></div>';
   }
   if (box.__h !== html){ box.__h = html; box.innerHTML = html; }
+}
+/* ---- 使用时间线：多设备 × 10 分钟「有人使用」点阵 ----
+   数据来自 /gw/usegrid：服务端按 10 分钟桶预计算指标（口径与场景分析一致），
+   前端只做判定与画图。阈值与 anSceneVerdict 同一套：
+   上行小包≥2 即有人（前台活跃也算）；对称连续（通话形态）必然有人；合计<1.5K/s=待机。 */
+var UG = { devs: [], win: 24, last: null, inited: false, grid: null, geom: null };
+var UG_COLORS = ['#2563eb', '#16a34a', '#f59e0b', '#dc2626', '#7c3aed', '#0891b2', '#db2777', '#65a30d'];
+function ugMsg(t){ var e = document.getElementById('ugSub'); if (e) e.textContent = t; }
+function ugVerdict(b){
+  // b = [n, medU, medD, ratio, q, cv, upSmall, bytes, mt]，阈值同 anSceneVerdict
+  if (!b || !b[0]) return { t: '无数据', used: 0 };
+  var mt = b[8], ratio = b[3], q = b[4], upSmall = b[6];
+  if (mt < 1536) return { t: '无人操作（待机）', used: 0 };
+  if (ratio > 0.45 && ratio < 2.2 && b[1] > 3072 && b[2] > 3072 && q < 0.08)
+    return { t: '人在使用（通话）', used: 1 };
+  if (upSmall >= 5)
+    return q >= 0.7 ? { t: '间歇拿起使用', used: 1 } : { t: '人在使用', used: 1 };
+  if (upSmall >= 2) return { t: '前台活跃', used: 1 };
+  return { t: '无交互（自动/后台）', used: 0 };
+}
+function ugDevItems(){
+  var pop = document.getElementById('ugDevPop'); if (!pop) return;
+  pop.innerHTML = (AN.devs || []).map(function(k, i){
+    var on = UG.devs.indexOf(k.key) >= 0;
+    return '<div class="ddopt ugopt" onclick="ugPickDev(' + i + ')"><span class="ugchk">' + (on ? '☑' : '☐') + '</span>' + anDevLabelHtml(k) + '</div>';
+  }).join('');
+}
+function ugDevLabel(){
+  var lab = document.getElementById('ugDevLab'); if (!lab) return;
+  if (!UG.devs.length){ lab.textContent = '选择设备…'; return; }
+  if (UG.devs.length === 1){
+    var k = null;
+    for (var i = 0; i < (AN.devs || []).length; i++) if (AN.devs[i].key === UG.devs[0]) k = AN.devs[i];
+    lab.textContent = k ? (k.name || k.ip || k.key) : UG.devs[0];
+  } else lab.textContent = UG.devs.length + ' 台设备';
+}
+function ugPickDev(i){
+  var k = (AN.devs || [])[i]; if (!k) return;
+  var at = UG.devs.indexOf(k.key);
+  if (at >= 0) UG.devs.splice(at, 1);
+  else {
+    if (UG.devs.length >= 8){ ugMsg('最多同时看 8 台'); return; }
+    UG.devs.push(k.key);
+  }
+  ugDevItems(); ugDevLabel(); ugLoad();   // 不关弹层，可连续勾选
+}
+function ugWinItems(){
+  var pop = document.getElementById('ugWinPop'); if (!pop) return;
+  pop.innerHTML = AN_WINS.map(function(w, i){
+    return '<div class="ddopt' + (w[0] === UG.win ? ' on' : '') + '" onclick="ugPickWin(' + i + ')">' + w[1] + '</div>';
+  }).join('');
+}
+function ugPickWin(i){
+  var w = AN_WINS[i]; if (!w) return;
+  UG.win = w[0];
+  var lab = document.getElementById('ugWinLab'); if (lab) lab.textContent = w[1];
+  ugWinItems(); ddCloseAll(); ugLoad();
+}
+function ugInit(){
+  if (!UG.inited){
+    UG.inited = true;
+    if (!UG.devs.length && AN.key) UG.devs = [AN.key];
+  }
+  var wl = document.getElementById('ugWinLab');
+  if (wl) for (var i = 0; i < AN_WINS.length; i++) if (AN_WINS[i][0] === UG.win) wl.textContent = AN_WINS[i][1];
+  ugBind(); ugDevItems(); ugDevLabel(); ugWinItems(); ugLoad();
+}
+function ugBind(){
+  var svg = document.getElementById('ugChart'); if (!svg || svg.__ugBound) return;
+  svg.__ugBound = true;
+  svg.addEventListener('click', function(ev){
+    if (!UG.grid || !UG.geom) return;
+    var r = svg.getBoundingClientRect();
+    var vb = (svg.getAttribute('viewBox') || '').split(/\s+/);
+    var vw = parseFloat(vb[2]) || r.width, vh = parseFloat(vb[3]) || r.height;
+    var x = (ev.clientX - r.left) / (r.width || 1) * vw;
+    var y = (ev.clientY - r.top) / (r.height || 1) * vh;
+    var g = UG.geom;
+    var c = Math.floor((x - g.padL) / g.bw), ri = Math.floor((y - g.padT) / g.rh);
+    if (c < 0 || c >= g.nb || ri < 0 || ri >= UG.grid.length) return;
+    ugShow(ri, c);
+  });
+}
+function ugShow(ri, c){
+  var row = UG.grid[ri]; if (!row || !row[c]) return;
+  var g = UG.geom;
+  var mark = document.getElementById('ugSelMark');
+  if (mark){
+    mark.setAttribute('x', (g.padL + c * g.bw - 0.6).toFixed(2));
+    mark.setAttribute('y', (g.padT + ri * g.rh).toFixed(2));
+    mark.setAttribute('width', Math.max(g.bw + 1.2, 3).toFixed(2));
+    mark.setAttribute('height', g.rh);
+    mark.style.display = '';
+  }
+  var d = (UG.last && UG.last.devs && UG.last.devs[ri]) || {};
+  var nm = String(d.name || d.ip || d.key || '');
+  var cell = row[c], b = cell.b, v = cell.v;
+  var line2 = !b ? '该 10 分钟没有采样（设备离线或采集器未上报）'
+    : b[0] + ' 个采样 · ↑中位 ' + fmtSpeed(b[1]) + ' · ↓中位 ' + fmtSpeed(b[2]) + ' · 静默 ' + Math.round(b[4] * 100) + '% · 上行小包 ' + b[6] + ' · 合计约 ' + fmtBytes(b[7]);
+  var dd = document.getElementById('ugDetail');
+  if (dd) dd.innerHTML = anHMin(cell.t0) + '–' + anHMin(cell.t0 + 600) + ' · ' + esc(cutName(nm, 14)) + ' → <b>' + v.t + '</b><br>' + line2;
+}
+function ugLoad(){
+  var svg = document.getElementById('ugChart');
+  if (!svg && !UG.devs.length) return;
+  if (!UG.devs.length){ ugMsg('请选择设备'); if (svg) svg.innerHTML = ''; return; }
+  ugMsg('加载中…');
+  apiFetch(API + '/gw/usegrid?devs=' + encodeURIComponent(UG.devs.join(',')) + '&hours=' + (UG.win || 24))
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      if (!j || !j.ok){ ugMsg('⚠ ' + ((j && j.error) || '失败')); return; }
+      UG.last = j; ugRender(j);
+    })
+    .catch(function(){ ugMsg('⚠ 服务器连接失败'); });
+}
+function ugRender(j){
+  var svg = document.getElementById('ugChart'); if (!svg) return;
+  var devs = j.devs || [];
+  var nb = j.nb || 1, frm = j.frm || ((j.now || Math.floor(Date.now() / 1000)) - nb * 600);
+  var W = svg.clientWidth || 340;
+  var padL = 78, padR = 4, padT = 6, padB = 14, rh = 18;
+  var rows = Math.max(1, devs.length);
+  var H = padT + rows * rh + padB;
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+  svg.style.height = H + 'px';
+  var iw = W - padL - padR, bw = iw / nb;
+  var p = [];
+  var hrs = j.hours || 24, stepH = hrs <= 6 ? 1 : (hrs <= 12 ? 2 : 4);
+  var gridB = padT + rows * rh;
+  // 小时刻度画在整点边界上（frm 只对齐 10 分钟，不对齐小时）
+  var tk = Math.ceil(frm / 3600) * 3600;
+  for (var t = tk; t <= frm + nb * 600; t += stepH * 3600){
+    var x = padL + (t - frm) / 600 * bw;
+    p.push('<line x1="' + x.toFixed(1) + '" y1="' + padT + '" x2="' + x.toFixed(1) + '" y2="' + gridB + '" stroke="#f1f4f9"/>');
+    p.push('<text x="' + x.toFixed(1) + '" y="' + (H - 4) + '" font-size="8" fill="#9aa4b2" text-anchor="middle">' + anHMin(t) + '</text>');
+  }
+  var grid = [];
+  for (var r = 0; r < devs.length; r++){
+    var d = devs[r], col = UG_COLORS[r % UG_COLORS.length];
+    var nm = cutName(String(d.name || d.ip || d.key || ''), 9);
+    var yc = padT + r * rh + rh / 2;
+    p.push('<rect x="2" y="' + (yc - 3).toFixed(1) + '" width="6" height="6" rx="1" fill="' + col + '"/>');
+    p.push('<text x="11" y="' + (yc + 3).toFixed(1) + '" font-size="9" fill="#1f2630">' + esc(nm) + '</text>');
+    var row2 = [];
+    for (var c = 0; c < nb; c++){
+      var b = (d.bk || [])[c];
+      var v = ugVerdict(b);
+      row2.push({ b: b, v: v, t0: frm + c * 600 });
+      var x0 = padL + c * bw, w2 = Math.max(bw - 0.4, 0.8);
+      var fill = !b ? '#eef2f7' : (v.used ? col : '#c3ccd8');
+      p.push('<rect x="' + x0.toFixed(2) + '" y="' + (yc - 4.5).toFixed(1) + '" width="' + w2.toFixed(2) + '" height="9" rx="1" fill="' + fill + '"/>');
+    }
+    grid.push(row2);
+  }
+  p.push('<rect id="ugSelMark" x="0" y="0" width="0" height="0" fill="none" stroke="#f59e0b" stroke-width="1" pointer-events="none" style="display:none"/>');
+  svg.innerHTML = p.join('');
+  UG.grid = grid; UG.geom = { padL: padL, bw: bw, padT: padT, rh: rh, nb: nb };
+  ugMsg(devs.length + ' 台 · 彩=有人 灰=无人 浅=无数据');
 }
 function anLoad(){
   var hrs = AN.win || 24;
