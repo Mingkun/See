@@ -551,7 +551,7 @@ function paintHourRows(){
   var b = document.getElementById('anHourOrder');
   if (b) b.textContent = AN_HOUR_DESC ? '↑ 正序' : '↓ 倒序';
   var mb = document.getElementById('anHourMore');
-  if (mb) { mb.style.display = AN_HOUR_ASC.length > 4 ? '' : 'none'; mb.textContent = AN_HOUR_FULL ? '⬆ 收起' : ('⬇ 展开 ' + AN_HOUR_ASC.length + ' 行'); }
+  if (mb) { mb.style.display = AN_HOUR_ASC.length > 4 ? '' : 'none'; mb.textContent = AN_HOUR_FULL ? '⬆ 收起' : '⬇ 展开'; }
 }
 function toggleHourFull(){
   AN_HOUR_FULL = !AN_HOUR_FULL;
