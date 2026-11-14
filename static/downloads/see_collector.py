@@ -114,11 +114,26 @@ class Gateway(object):
         log('网关重连：login=%s allInfo=%s (HTTP %s, %d字节)' % (ok, has_json, st, len(txt)))
         return ok and has_json
 
-    def forget(self):
-        """释放网关会话：清 Cookie（采集暂停时把光猫让给浏览器登录）。"""
+    def logout(self):
+        """真正退出网关会话（华为固件只允许一个管理员在线）。
+
+        只清本地 Cookie 不够：服务端会话还在，浏览器登录会被拒（提示「已在其他
+        设备登录」）。必须先请求 /cgi-bin/luci/admin/logout 让网关把会话注销掉。
+        """
+        st = -1
+        try:
+            st, _ = self.http.get('http://%s/cgi-bin/luci/admin/logout' % self.ip,
+                                  {'User-Agent': UA})
+        except Exception as e:  # noqa: BLE001
+            log('网关登出请求异常：%s' % e)
         self.http.jar.clear()
         self.login_ts = 0.0
-        log('采集中断：已清除网关 Cookie，浏览器可登录光猫')
+        log('采集暂停：已登出网关（HTTP %s），浏览器可登录光猫' % st)
+        return st == 200
+
+    def forget(self):
+        """兼容旧调用：等同 logout()。"""
+        return self.logout()
 
     def probe_login(self):
         """模拟浏览器登录（全新 Cookie 罐）：登录 → 设备页 → devInfo，用完即丢弃。
@@ -136,6 +151,9 @@ class Gateway(object):
         out['login_status'] = st
         out['login_ms'] = int((time.time() - t0) * 1000)
         out['login_form_left'] = bool('name="psd"' in txt)
+        out['taken'] = bool('其他' in txt and ('登录' in txt or '设备' in txt))
+        if out['taken']:
+            out['snip'] = ' '.join(txt.split())[:200]
         out['cookies'] = len(list(h.jar))
         try:
             st2, txt2 = h.get('http://%s/cgi-bin/luci/admin/device/pc' % self.ip, {'User-Agent': UA})
