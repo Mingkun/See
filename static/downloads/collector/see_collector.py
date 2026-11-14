@@ -20,17 +20,25 @@ see 采集器 —— 把「手机里的采集逻辑」搬到内网常驻设备�
 
 import argparse
 import http.cookiejar
+import io
 import json
 import os
 import re
+import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
 UA = 'Mozilla/5.0 (Linux; Android 14)'
-REL_LOGIN = 120          # 网关会话过期（秒），与 app 一致
+REL_LOGIN = 3600         # 兜底重登阈值（秒）：正常靠 cookie 保持会话，掉登录页才重登
+LOGIN_GAP = 20           # 两次登录的最小间隔（秒）：10 秒轮询下防止「取不到就重登」连环刷，
+                         # 网关只允许一个管理员会话，连续 POST /cgi-bin/luci 会自己顶自己
+ALLINFO_EVERY = 3        # 设备表（allInfo）几轮取一次：名字/链路类型几乎不变，没必要每轮都拉
+OBS_EVERY = 60           # 观察页（MAC/厂商）扫描间隔：ping 全网段+SSDP+mDNS 要十几秒，
+                         # 必须离开采样主循环（10 秒轮询下它会吃满整个周期）
 ABSENT_TTL = 25 * 3600   # 缺席超过这个时间就不再补 present=0（与 app 的 25h 同口径）
 
 
@@ -67,6 +75,17 @@ class Http(object):
         return self._open(req)
 
 
+# 常见厂商 OUI 前缀（MAC 前 3 字节去冒号）：认不出就空着，不瞎猜。
+# 条目来自常见 IoT 厂商公开 OUI + 本网关 devInfo 实测（ECA62F=华为光猫）。
+OUI_VENDORS = {
+    '246F28': '乐鑫Espressif', '30AEA4': '乐鑫Espressif', '5CCF7F': '乐鑫Espressif',
+    'A4CF12': '乐鑫Espressif', 'BCDDC2': '乐鑫Espressif', '68C63A': '乐鑫Espressif',
+    '24B2DE': '乐鑫Espressif', '183AF0': '乐鑫Espressif', 'D8A01B': '乐鑫Espressif',
+    '640980': '小米', '7811DC': '小米', 'ACC1EE': '小米', '508F4C': '小米', 'F8A45F': '小米',
+    'ECA62F': '华为',
+}
+
+
 class Gateway(object):
     """华为 OptiXstar（LuCI1）网关：登录 + 读 allInfo。"""
 
@@ -76,8 +95,12 @@ class Gateway(object):
         self.pw = pw
         self.http = Http(timeout=8.0)
         self.login_ts = 0.0
+        self.logins = 0
 
     def login(self):
+        # 刚登过就别再登：同一会话连着 POST 会把上一个会话顶掉，等于自废 cookie
+        if self.login_ts and time.time() - self.login_ts < LOGIN_GAP:
+            return False
         form = urllib.parse.urlencode({'username': self.user, 'psd': self.pw}).encode()
         try:
             self.http.post('http://%s/cgi-bin/luci' % self.ip, form,
@@ -86,12 +109,173 @@ class Gateway(object):
             log('网关登录请求异常：%s' % e)
             return False
         self.login_ts = time.time()
+        self.logins += 1
+        log('网关登录（本进程第 %d 次）：会话缺失或被顶掉' % self.logins)
         return True
+
+    def relogin(self):
+        """退出登录（清 Cookie）→ 重新登录 → 验证 allInfo 有 JSON。"""
+        self.http.jar.clear()   # 清 Cookie = 退出
+        self.login_ts = 0.0
+        ok = self.login()
+        st, txt = self.allinfo()
+        has_json = txt.lstrip().startswith('{')
+        log('网关重连：login=%s allInfo=%s (HTTP %s, %d字节)' % (ok, has_json, st, len(txt)))
+        return ok and has_json
+
+    def logout(self):
+        """真正退出网关会话（华为固件只允许一个管理员在线）。
+
+        只清本地 Cookie 不够：服务端会话还在，浏览器登录会被拒（提示「已在其他
+        设备登录」）。必须先请求 /cgi-bin/luci/admin/logout 让网关把会话注销掉。
+        """
+        st = -1
+        try:
+            st, _ = self.http.get('http://%s/cgi-bin/luci/admin/logout' % self.ip,
+                                  {'User-Agent': UA})
+        except Exception as e:  # noqa: BLE001
+            log('网关登出请求异常：%s' % e)
+        self.http.jar.clear()
+        self.login_ts = 0.0
+        log('采集暂停：已登出网关（HTTP %s），浏览器可登录光猫' % st)
+        return st == 200
+
+    def forget(self):
+        """兼容旧调用：等同 logout()。"""
+        return self.logout()
+
+    def probe_login(self):
+        """模拟浏览器登录（全新 Cookie 罐）：登录 → 设备页 → devInfo，用完即丢弃。
+        用于「暂停采集」时验证网页能否登录光猫，不影响本进程的会话。"""
+        h = Http(timeout=10.0)
+        out = {'ip': self.ip, 'user': self.user}
+        form = urllib.parse.urlencode({'username': self.user, 'psd': self.pw}).encode()
+        t0 = time.time()
+        try:
+            st, txt = h.post('http://%s/cgi-bin/luci' % self.ip, form,
+                             {'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': UA})
+        except Exception as e:  # noqa: BLE001
+            out['error'] = '登录请求异常：%s' % e
+            return out
+        out['login_status'] = st
+        out['login_ms'] = int((time.time() - t0) * 1000)
+        out['login_form_left'] = bool('name="psd"' in txt)
+        out['taken'] = bool('其他' in txt and ('登录' in txt or '设备' in txt))
+        if out['taken']:
+            out['snip'] = ' '.join(txt.split())[:200]
+        out['cookies'] = len(list(h.jar))
+        try:
+            st2, txt2 = h.get('http://%s/cgi-bin/luci/admin/device/pc' % self.ip, {'User-Agent': UA})
+            out['page_status'] = st2
+            out['page_len'] = len(txt2)
+            out['page_ok'] = bool(st2 == 200 and 'name="psd"' not in txt2)
+        except Exception as e:  # noqa: BLE001
+            out['page_error'] = str(e)
+        try:
+            body = urllib.parse.urlencode({'type': '0'}).encode()
+            st3, txt3 = h.post('http://%s/cgi-bin/luci/admin/device/devInfo' % self.ip, body,
+                               {'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': UA})
+            out['devinfo_status'] = st3
+            if txt3.lstrip().startswith('{'):
+                d = json.loads(txt3)
+                n = int(d.get('count') or 0)
+                nz = 0
+                for k in range(1, n + 1):
+                    e = d.get('dev%d' % k) or {}
+                    if float(e.get('upSpeed') or 0) > 0 or float(e.get('downSpeed') or 0) > 0:
+                        nz += 1
+                out['devices'] = n
+                out['nonzero'] = nz
+        except Exception as e:  # noqa: BLE001
+            out['devinfo_error'] = str(e)
+        return out
+
+    def raw_allinfo(self):
+        """返回 allInfo 原始文本（诊断用）。"""
+        st, txt = self.allinfo()
+        return st, txt
+
+    def fetch(self, path):
+        """按需抓取任意已登录页面（诊断用），返回 (status, 文本)。"""
+        # 不按时间预登录：先带已有 cookie 请求，掉登录页再重登（省登录次数）
+        st, txt = self._raw_get(path)
+        # 登录页特征：带 name="psd" 且不含设备表 —— 说明会话被顶掉，重登一次再取
+        if 'name="psd"' in txt or 'name=\"psd\"' in txt:
+            self.login()
+            st, txt = self._raw_get(path)
+        return st, txt
+
+    def _raw_get(self, path):
+        try:
+            return self.http.get('http://%s%s' % (self.ip, path), {'User-Agent': UA})
+        except Exception as e:  # noqa: BLE001
+            return -1, '请求异常：%s' % e
+
+    def post(self, path, form):
+        """按需 POST 表单（诊断用），返回 (status, 文本)。"""
+        # 不按时间预登录：先带已有 cookie 请求，掉登录页再重登（省登录次数）
+        body = urllib.parse.urlencode(form or {}).encode()
+        st, txt = self._raw_post(path, body)
+        if 'name="psd"' in txt:
+            self.login()
+            st, txt = self._raw_post(path, body)
+        return st, txt
+
+    def _raw_post(self, path, body):
+        try:
+            return self.http.post('http://%s%s' % (self.ip, path), body,
+                                  {'Content-Type': 'application/x-www-form-urlencoded',
+                                   'User-Agent': UA})
+        except Exception as e:  # noqa: BLE001
+            return -1, '请求异常：%s' % e
+
+    def devinfo_speeds(self):
+        """POST devInfo(type=0) 取每台设备的实时速率 -> ({ip: (up, down)}, count, status)。
+
+        网关页面（admin/device/pc）就是这么取速率的：XHR.poll 带 {type:'0'}，
+        回 json.count + json.dev1..devN，字段 upSpeed/downSpeed（单位 bps）。
+        allInfo 的 upSpeed/downSpeed 在这台固件上恒为 0，故速率以本接口为准。
+        """
+        st, txt = self.post('/cgi-bin/luci/admin/device/devInfo', {'type': '0'})
+        out = {}
+        if st != 200 or not txt.lstrip().startswith('{'):
+            return out, 0, st
+        try:
+            j = json.loads(txt)
+        except Exception:  # noqa: BLE001
+            return out, 0, st
+        try:
+            n = int(j.get('count') or 0)
+        except Exception:  # noqa: BLE001
+            n = 0
+        for i in range(1, n + 1):
+            d = j.get('dev%d' % i) or {}
+            if not isinstance(d, dict):
+                continue
+            ip = str(d.get('ip') or '')
+            if not ip or ip == '--':
+                continue
+            try:
+                out[ip] = (float(d.get('upSpeed') or 0), float(d.get('downSpeed') or 0))
+            except (TypeError, ValueError):
+                continue
+        return out, n, st
+
+    def gwstatus(self):
+        """光猫自身状态：cpuUsed(%) / upTime(秒) / 无线客户端数等。取不到返回 None。"""
+        try:
+            st, txt = self.http.get('http://%s/cgi-bin/luci/admin/settings/gwstatus' % self.ip,
+                                    {'User-Agent': UA})
+            if st != 200 or not txt.lstrip().startswith('{'):
+                return None
+            j = json.loads(txt)
+            return j if isinstance(j, dict) else None
+        except Exception:  # noqa: BLE001
+            return None
 
     def allinfo(self):
         """返回 (status, 文本)。文本以 { 开头才算登录成功。"""
-        if time.time() - self.login_ts > REL_LOGIN:
-            self.login()
+        # 不按时间预登录：先带已有 cookie 请求，掉登录页再重登（省登录次数）
         try:
             st, txt = self.http.get('http://%s/cgi-bin/luci/admin/allInfo' % self.ip, {'User-Agent': UA})
         except Exception as e:  # noqa: BLE001
@@ -104,64 +288,22 @@ class Gateway(object):
                 return -1, '请求异常：%s' % e
         return st, txt
 
-    def token(self):
-        """devInfo 需要页面里的 token（与 app 同一套做法）。"""
-        if getattr(self, 'token_v', ''):
-            return self.token_v
-        try:
-            st, txt = self.http.get('http://%s/cgi-bin/luci/admin/device/pc' % self.ip,
-                                    {'User-Agent': UA})
-            m = re.search(r"token\s*:\s*'([0-9a-zA-Z]+)'", txt or '')
-            if m:
-                self.token_v = m.group(1)
-        except Exception:  # noqa: BLE001
-            pass
-        return getattr(self, 'token_v', '')
-
-    def dev_info(self, typ):
-        """网关权威的链路类型：POST /admin/device/devInfo type=0 有线 / type=1 无线。
-
-        返回 {ip: 'wired'|'wifi'}；拿不到就返回空表（页面会显示「—」，不影响采样）。
-        注：allInfo 的 pc*/wifi* 只是槽位索引，会漂移，不能当链路类型。
-        """
-        out = {}
-        tok = self.token()
-        body = urllib.parse.urlencode({'type': str(typ)}).encode()
-        head = {'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': UA}
-        if tok:
-            body = urllib.parse.urlencode({'token': tok, 'type': str(typ)}).encode()
-        try:
-            st, txt = self.http.post('http://%s/cgi-bin/luci/admin/device/devInfo' % self.ip, body, head)
-        except Exception:  # noqa: BLE001
-            return out
-        if not (txt or '').lstrip().startswith('{'):
-            self.login()
-            self.token_v = ''
-            body = urllib.parse.urlencode({'type': str(typ)}).encode()
-            try:
-                st, txt = self.http.post('http://%s/cgi-bin/luci/admin/device/devInfo' % self.ip, body, head)
-            except Exception:  # noqa: BLE001
-                return out
-        if not (txt or '').lstrip().startswith('{'):
-            return out
-        try:
-            j = json.loads(txt)
-        except Exception:  # noqa: BLE001
-            return out
-        want = 'wired' if str(typ) == '0' else 'wifi'
-        for k, d in j.items():
-            if not (isinstance(d, dict) and k.startswith('dev')):
-                continue
-            ip = str(d.get('ip') or '')
-            if ip and ip != '--':
-                out[ip] = want
-        return out
+    # 链路类型不再走 devInfo（要 token、按 IP 对表、60s 一刷、一半失败时整表被
+    # 替换——历史上链路来回翻/大量空值就是这么来的）。改直接用 allInfo 记录所在
+    # 的列表：pc* = 有线、wifi* = 无线（与网关首页 wcount/wlcount 同一份口径，
+    # 实测计数完全一致），见 parse_allinfo()。
 
 
 def parse_allinfo(txt):
-    """allInfo JSON -> 设备列表。devkey 用 IP（网关 pc1/wifi1 是槽位会漂移）。"""
+    """allInfo JSON -> 设备列表。devkey 用 IP（网关 pc1/wifi1 是槽位会漂移）。
+
+    链路类型直接取记录所在的列表：pc* = 有线、wifi* = 无线，每轮采样自带、
+    逐条对应，不用再按 IP 去对 devInfo 的表。
+    手机（type=phone）即使落在 pc* 里也按 无线 算：那是接在 BE7 这类
+    子路由/AP WiFi 下的手机，主网关只看见流量从它的网口进来，分不出无线。
+    """
     j = json.loads(txt)
-    out = []
+    seen = {}
     for k, d in j.items():
         if not (k.startswith('pc') or k.startswith('wifi')):
             continue
@@ -172,9 +314,17 @@ def parse_allinfo(txt):
         if ip == '--':
             ip = ''
         dk = ip if ip else k
-        out.append({'key': dk, 'name': name, 'ip': ip,
-                    'up': float(d.get('upSpeed') or 0), 'down': float(d.get('downSpeed') or 0)})
-    return out
+        link = 'wired' if k.startswith('pc') else 'wifi'
+        if str(d.get('type') or '').lower() == 'phone':
+            link = 'wifi'
+        row = {'key': dk, 'name': name, 'ip': ip, 'link': link,
+               'up': float(d.get('upSpeed') or 0), 'down': float(d.get('downSpeed') or 0)}
+        old = seen.get(dk)
+        # 同 IP 两条记录（双宿/换表瞬间）：留流量大的，平手按有线
+        if old is None or ((row['up'] + row['down'], row['link'] == 'wired') >
+                           (old['up'] + old['down'], old['link'] == 'wired')):
+            seen[dk] = row
+    return list(seen.values())
 
 
 class Collector(object):
@@ -189,28 +339,24 @@ class Collector(object):
         self.cfg = {}
         self.gw = None
         self.buf = []
-        self.known = {}          # devkey -> (name, ip, last_seen_ts)
+        self.known = {}          # devkey -> (name, ip, last_seen_ts, link)
         self.cfg_ts = 0.0
-        self.links = {}          # ip -> wired/wifi（60s 缓存）
-        self.link_ts = 0.0
-
-    # ---------- 链路类型（有线/无线）----------
-    def link_map(self):
-        """60 秒刷一次；devInfo 挂了就沿用上次结果（拿不到就空，不影响采样）。"""
-        if self.links and time.time() - self.link_ts < 60:
-            return self.links
-        gw = self.gateway()
-        m = {}
-        try:
-            m.update(gw.dev_info('0'))
-            m.update(gw.dev_info('1'))
-        except Exception as e:  # noqa: BLE001
-            log('读链路类型失败（忽略）：%s' % e)
-            return self.links
-        if m:
-            self.links = m
-            self.link_ts = time.time()
-        return self.links
+        self.cmd_ts = 0.0
+        self.on_ts = 0.0          # 最近一次「只拉开关」的时间
+        self.off_log = 0.0        # 暂停期间日志节流
+        self.up_log = 0.0         # 上传日志节流（间隔缩小后不然刷屏）
+        self.dev_logged = False   # devInfo 失败日志只打一次
+        self.was_enabled = None   # 上一轮开关状态（None=首轮）：用于「暂停让出光猫」「恢复重登」
+        self.cpu = None           # 光猫 CPU 使用率（%），随采样一起上报
+        self.up_sec = 0           # 光猫已运行秒数
+        self.rnd = 0              # 采样轮次（CPU/设备表隔轮取用）
+        self.cost_log = 0.0       # 「本轮耗时」日志节流
+        self.dev_cache = []       # 缓存的设备表（allInfo 解析结果）
+        self.http_obs = Http(timeout=20.0)   # 观察上报专用连接（扫描在后台线程，避免与采样抢 self.http）
+        self.obs_ts = 0.0         # 上次观察扫描时间
+        self.obs_busy = False     # 后台扫描是否还在跑
+        self.ai_ts = 0.0          # 设备表缓存时间
+        self.t_last = {}          # 上一轮各步骤耗时（给日志用）
 
     # ---------- 服务器：配置 ----------
     def refresh_cfg(self):
@@ -238,10 +384,28 @@ class Collector(object):
             return False
         self.cfg = {'ip': j.get('ip') or '', 'user': j.get('user') or '',
                     'on': bool(j.get('on')), 'anDev': j.get('anDev') or '',
-                    'anWin': j.get('anWin') or 24}
+                    'anWin': j.get('anWin') or 24,
+                    'sampleEvery': j.get('sampleEvery') or 0,
+                    'uploadEvery': j.get('uploadEvery') or 0}
         self.cfg['pa' + 'ss'] = j.get('pa' + 'ss') or ''
         self.cfg_ts = time.time()
         return True
+
+    def poll_on(self):
+        """只拉总开关（/api/gw/on，不含凭据）。
+
+        整配置（含密码）仍旧 5 分钟一次；但「暂停/恢复」要立刻生效，
+        否则暂停后还要等最坏 5 分钟才生效，那这个开关就没用了。
+        老服务器没这个口时静默忽略（退回 5 分钟一轮）。
+        """
+        try:
+            st, txt = self.http.get(self.api + '/api/gw/on', {'X-See-Key': self.key})
+            j = json.loads(txt or '{}')
+        except Exception:  # noqa: BLE001
+            return
+        self.on_ts = time.time()
+        if isinstance(j, dict) and j.get('ok'):
+            self.cfg['on'] = bool(j.get('on'))
 
     def gateway(self):
         ip = self.gw_ip or self.cfg.get('ip') or '192.168.1.1'
@@ -260,7 +424,11 @@ class Collector(object):
         if not self.upload or not self.buf:
             return 0
         rows = self.buf[:2000]
-        body = json.dumps({'samples': rows}, ensure_ascii=False).encode()
+        payload = {'samples': rows, 'ts': int(time.time())}
+        if self.cpu is not None:
+            payload['cpu'] = self.cpu
+            payload['uptime'] = self.up_sec
+        body = json.dumps(payload, ensure_ascii=False).encode()
         try:
             st, txt = self.http.post(self.api + '/api/gw/samples', body,
                                      {'Content-Type': 'application/json', 'X-See-Key': self.key})
@@ -279,36 +447,269 @@ class Collector(object):
     # ---------- 一轮采样 ----------
     def sample_once(self):
         gw = self.gateway()
-        st, txt = gw.allinfo()
-        if not txt.lstrip().startswith('{'):
-            snip = ' '.join(txt.split())[:80]
-            log('网关未返回数据（HTTP %s）：%s' % (st, snip or '（空）'))
-            return 0
+        self.rnd = getattr(self, 'rnd', 0) + 1
+        t_ai = t_dv = t_cpu = 0.0
+        # 设备表（名字/链路类型）几十分钟都不变，没必要每轮都拉：
+        # allInfo 一次好几秒，改成 3 轮一次（约 30 秒），中间直接用缓存，
+        # 每轮只留 devInfo（速率，必须实时）这一次往返。
+        need_ai = ((self.rnd % ALLINFO_EVERY == 1) or not self.dev_cache
+                   or (time.time() - self.ai_ts > 180))
+        if need_ai:
+            _t = time.time()
+            st, txt = gw.allinfo()
+            t_ai = time.time() - _t
+            if txt.lstrip().startswith('{'):
+                try:
+                    self.dev_cache = parse_allinfo(txt)
+                    self.ai_ts = time.time()
+                except Exception as e:  # noqa: BLE001
+                    log('解析 allInfo 失败：%s' % e)
+            elif self.dev_cache:
+                log('allInfo 暂不可用（HTTP %s），沿用 %d 秒前的设备表'
+                    % (st, int(time.time() - self.ai_ts)))
+            else:
+                snip = ' '.join(txt.split())[:80]
+                log('网关未返回数据（HTTP %s）：%s' % (st, snip or '（空）'))
+                return 0
+        devs = [dict(d) for d in self.dev_cache]   # 拷贝：下面要按 IP 覆盖速率
+
+        # 速率：devInfo(type=0) 才是真数据源（allInfo 的 up/down 恒为 0）
+        speeds, devcnt, dst = {}, 0, -1
+        _t = time.time()
         try:
-            devs = parse_allinfo(txt)
+            speeds, devcnt, dst = gw.devinfo_speeds()
         except Exception as e:  # noqa: BLE001
-            log('解析 allInfo 失败：%s' % e)
-            return 0
+            log('devInfo 速率读取失败：%s' % e)
+        t_dv = time.time() - _t
+        # 光猫自身指标（CPU%）：独立接口，取不到不影响采样。
+        # 10 秒轮询下不必每轮都取：CPU 3 轮一更（约 30 秒），少一次往返好让整轮挤进采样周期。
+        if self.rnd % 3 == 1 or self.cpu is None:
+            _t = time.time()
+            try:
+                gs = gw.gwstatus()
+                if gs:
+                    self.cpu = float(gs.get('cpuUsed'))
+                    self.up_sec = int(gs.get('upTime') or 0)
+            except Exception:  # noqa: BLE001
+                pass
+            t_cpu = time.time() - _t
+        self.t_last = {'ai': t_ai, 'dv': t_dv, 'cpu': t_cpu, 'devs': len(devs)}
+
+        if speeds:
+            hit = 0
+            for d in devs:
+                sp = speeds.get(d.get('ip') or '')
+                if sp is not None:
+                    # devInfo 的 upSpeed/downSpeed 单位是 bps（光猫页面就是 Kb/s），
+                    # 数据库/前端统一按字节/秒（B/s）存，故除以 8。
+                    d['up'], d['down'] = sp[0] / 8.0, sp[1] / 8.0
+                    hit += 1
+            if hit:
+                log('速率来自 devInfo：%d/%d 台有值（网关报 %d 台）' % (hit, len(devs), devcnt))
+        elif not self.dev_logged:
+            self.dev_logged = True
+            log('devInfo 未取到速率（HTTP %s，count=%s）' % (dst, devcnt))
 
         now = int(time.time())
-        links = self.link_map()
         n = 0
         seen = set()
         for d in devs:
             seen.add(d['key'])
-            self.known[d['key']] = (d['name'], d['ip'], now)
+            self.known[d['key']] = (d['name'], d['ip'], now, d.get('link') or '')
             self.buf.append([now, d['key'], d['name'], d['ip'], 1, d['up'], d['down'],
-                             links.get(d['ip'], '')])
+                             d.get('link') or ''])
             n += 1
-        # 缺席设备补 present=0（网关/休眠/离线都能看出来）
-        for dk, (name, ip, last) in list(self.known.items()):
+        # 缺席设备补 present=0（网关/休眠/离线都能看出来）；链路沿用它自己最近一次
+        for dk, (name, ip, last, lk) in list(self.known.items()):
             if dk in seen:
                 continue
             if now - last > ABSENT_TTL:
                 self.known.pop(dk, None)
                 continue
-            self.buf.append([now, dk, name, ip, 0, 0.0, 0.0, links.get(ip, '')])
+            self.buf.append([now, dk, name, ip, 0, 0.0, 0.0, lk])
         return n
+
+    # ---------- 局域网发现（观察页数据源：MAC/厂商/在线） ----------
+    def lan_scan(self):
+        """ping 全网段后读 /proc/net/arp → [{ip, mac, vendor}]（免 root）。"""
+        import concurrent.futures
+        gw_ip = self.gw_ip or self.cfg.get('ip') or '192.168.1.1'
+        prefix = gw_ip.rsplit('.', 1)[0]
+        devnull = subprocess.DEVNULL
+
+        def ping(ip):
+            try:
+                subprocess.run(['ping', '-c', '1', '-W', '1', '-n', ip],
+                               stdout=devnull, stderr=devnull, timeout=3)
+            except Exception:  # noqa: BLE001
+                pass
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=64) as ex:
+            list(ex.map(ping, ['%s.%d' % (prefix, i) for i in range(1, 255)]))
+        out = []
+        try:
+            for line in open('/proc/net/arp', encoding='utf-8', errors='ignore').read().splitlines()[1:]:
+                f = line.split()
+                if len(f) >= 4 and f[2] == '0x2':
+                    ip, hw = f[0], f[3].upper()
+                    if ip.startswith(prefix + '.') and hw and hw != '00:00:00:00:00:00':
+                        out.append({'ip': ip, 'mac': hw,
+                                    'vendor': OUI_VENDORS.get(hw.replace(':', '')[:6], '')})
+        except Exception:  # noqa: BLE001
+            pass
+        return out
+
+    # ---------- SSDP/UPnP：设备自述（friendlyName / manufacturer / model） ----------
+    def ssdp_scan(self, timeout=3.0):
+        """M-SEARCH 组播 → 收 LOCATION → 取 XML → {ip: (friendlyName, manufacturer, modelName)}。"""
+        import socket as sk
+        msg = ('M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\n'
+               'MAN: "ssdp:discover"\r\nMX: 2\r\nST: ssdp:all\r\n\r\n').encode()
+        s2 = sk.socket(sk.AF_INET, sk.SOCK_DGRAM)
+        s2.settimeout(0.5)
+        s2.setsockopt(sk.IPPROTO_IP, sk.IP_MULTICAST_TTL, 2)
+        loc = {}
+        try:
+            s2.sendto(msg, ('239.255.255.250', 1900))
+            end = time.time() + timeout
+            while time.time() < end:
+                try:
+                    data, addr = s2.recvfrom(4096)
+                except sk.timeout:
+                    continue
+                for line in data.decode('utf-8', 'ignore').splitlines():
+                    if line.upper().startswith('LOCATION:'):
+                        loc[addr[0]] = line.split(':', 1)[1].strip()
+                        break
+        except Exception:  # noqa: BLE001
+            pass
+        finally:
+            s2.close()
+        out = {}
+        for ip, url in list(loc.items())[:20]:
+            try:
+                st2, xml = self.http.get(url, {'User-Agent': UA})
+                fn = re.search(r'<friendlyName>(.*?)</friendlyName>', xml or '', re.S)
+                mf = re.search(r'<manufacturer>(.*?)</manufacturer>', xml or '', re.S)
+                md = re.search(r'<modelName>(.*?)</modelName>', xml or '', re.S)
+                out[ip] = (fn.group(1).strip() if fn else '',
+                           mf.group(1).strip() if mf else '',
+                           md.group(1).strip() if md else '')
+            except Exception:  # noqa: BLE001
+                pass
+        return out
+
+    # ---------- mDNS：服务发现（Apple/Chromecast/打印机等广播自己的服务） ----------
+    def mdns_scan(self, timeout=3.0):
+        """DNS-SD PTR 查询 → 从应答里抓 _xxx._tcp/_udp 服务名 → {ip: ['_airplay._tcp', ...]}。"""
+        import socket as sk
+        q = (b'\x00\x00\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00'
+             b'\x09_services\x07_dns-sd\x04_udp\x05local\x00\x00\x0c\x00\x01')
+        s2 = sk.socket(sk.AF_INET, sk.SOCK_DGRAM)
+        s2.settimeout(0.5)
+        svc = {}
+        try:
+            s2.sendto(q, ('224.0.0.251', 5353))
+            end = time.time() + timeout
+            while time.time() < end:
+                try:
+                    data, addr = s2.recvfrom(4096)
+                except sk.timeout:
+                    continue
+                names = re.findall(rb'[_a-zA-Z0-9-]{2,32}\._[a-zA-Z0-9-]{2,16}\._(?:tcp|udp)', data)
+                if names:
+                    svc.setdefault(addr[0], set()).update(n.decode('ascii', 'ignore').split('._')[0] + '·' for n in ())
+                    for n in names:
+                        nm = n.decode('ascii', 'ignore')
+                        svc.setdefault(addr[0], set()).add(nm)
+        except Exception:  # noqa: BLE001
+            pass
+        finally:
+            s2.close()
+        return {ip: sorted(v)[:3] for ip, v in svc.items()}
+
+    # ---------- TCP 指纹：读端口 banner（HTTP Server 头 / RTSP 等） ----------
+    def banner_scan(self, ips, timeout=0.8):
+        """并发探 80/554/9100，读首段字节提取指纹 → {ip: 'Server: xxx' 或 'RTSP'}。"""
+        import concurrent.futures
+        import socket as sk
+        ports = (80, 554, 9100)
+
+        def probe(ip):
+            for port in ports:
+                try:
+                    c = sk.create_connection((ip, port), timeout=timeout)
+                    c.sendall(b'GET / HTTP/1.0\r\n\r\n' if port == 80 else b'OPTIONS * RTSP/1.0\r\n\r\n')
+                    c.settimeout(timeout)
+                    buf = c.recv(256)
+                    c.close()
+                    txt = buf.decode('utf-8', 'ignore')
+                    m = re.search(r'Server:\s*(.{2,40})', txt, re.I)
+                    if m:
+                        return m.group(1).strip()
+                    if 'RTSP' in txt:
+                        return 'RTSP设备'
+                except Exception:  # noqa: BLE001
+                    pass
+            return ''
+
+        out = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=24) as ex:
+            for ip, banner in zip(ips, ex.map(probe, ips)):
+                if banner:
+                    out[ip] = banner
+        return out
+
+    def report_obs(self):
+        devs = self.lan_scan()
+        ssdp = self.ssdp_scan()
+        mdns = self.mdns_scan()
+        banners = self.banner_scan([d['ip'] for d in devs if d.get('mac')][:40])
+        for d in devs:
+            ip = d['ip']
+            if ip in ssdp:
+                fn, mf, md = ssdp[ip]
+                if mf and not d.get('vendor'):
+                    d['vendor'] = mf[:24]
+                if fn and not d.get('hostname'):
+                    d['hostname'] = fn[:24]
+                if md and not d.get('type'):
+                    d['type'] = md[:24]
+            if ip in mdns and not d.get('type'):
+                d['type'] = '·'.join(mdns[ip])[:24]
+            if ip in banners and not d.get('type'):
+                d['type'] = banners[ip]
+        body = json.dumps({'devices': devs}, ensure_ascii=False).encode()
+        try:
+            st, txt = self.http_obs.post(self.api + '/api/obs/report', body,
+                                         {'Content-Type': 'application/json', 'X-See-Key': self.key})
+            j = json.loads(txt)
+            if not j.get('ok'):
+                log('观察上报被拒：%s' % j.get('error'))
+                return 0
+        except Exception as e:  # noqa: BLE001
+            log('观察上报失败（忽略）：%s' % e)
+            return 0
+        log('观察上报：%d 台（MAC/厂商）' % len(devs))
+        return len(devs)
+
+    def obs_dispatch(self, every=OBS_EVERY):
+        """观察页扫描放后台线程：ping 全网段+SSDP+mDNS 要十几秒，绝不能卡住 10 秒采样。"""
+        now = time.time()
+        if self.obs_busy or now - self.obs_ts < max(10, int(every or 0)):
+            return
+        self.obs_ts = now
+        self.obs_busy = True
+
+        def _work():
+            try:
+                self.report_obs()
+            except Exception as e:  # noqa: BLE001
+                log('观察上报异常（忽略）：%s' % e)
+            finally:
+                self.obs_busy = False
+
+        threading.Thread(target=_work, daemon=True).start()
 
     def selfcheck(self):
         ok = True
@@ -331,35 +732,172 @@ class Collector(object):
                 devs = parse_allinfo(txt)
                 log('✓ 数据：解析出 %d 台设备（示例：%s）'
                     % (len(devs), devs[0] if devs else '—'))
-                try:
-                    lm = gw.dev_info('0')
-                    lm.update(gw.dev_info('1'))
-                    log('✓ 链路：拿到 %d 台的 有线/无线' % len(lm))
-                except Exception as e:  # noqa: BLE001
-                    log('~ 链路：拿不到（不影响采集）：%s' % e)
+                wl = sum(1 for x in devs if x.get('link') == 'wifi')
+                log('✓ 链路：无线 %d 台 / 有线 %d 台（手机一律按无线，含挂在子路由/AP 下的）'
+                    % (wl, len(devs) - wl))
         n = self.flush()
         if self.upload:
             log('✓ 上传：%d 条' % n)
         return ok
 
-    def run(self, interval=10, upload_every=60):
-        log('see 采集器启动：api=%s 采样 %ds / 上传 %ds' % (self.api, interval, upload_every))
+    def poll_cmd(self):
+        """轮询服务器指令（/api/gw/cmd，机器密钥）。"""
+        try:
+            st, txt = self.http.get(self.api + '/api/gw/cmd', {'X-See-Key': self.key})
+            j = json.loads(txt)
+            cmd = (j or {}).get('cmd') or ''
+            if cmd:
+                log('收到服务器指令：%s' % cmd)
+                self.exec_cmd(cmd, (j or {}).get('payload') or {})
+                # 回报结果并清除指令
+                self.http.post(self.api + '/api/gw/cmd',
+                               json.dumps({'done': cmd}).encode(),
+                               {'Content-Type': 'application/json', 'X-See-Key': self.key})
+        except Exception:
+            pass   # 指令通道静默失败（不影响采样）
+
+    def exec_cmd(self, cmd, payload=None):
+        payload = payload or {}
+        if cmd == 'gw_relogin':
+            try:
+                self.gateway().relogin()
+            except Exception as e:  # noqa: BLE001
+                log('网关重连异常：%s' % e)
+        elif cmd == 'gw_diag':
+            try:
+                gw = self.gateway()
+                st, txt = gw.raw_allinfo()
+                # 截取前 8KB 上报（够诊断字段结构）
+                snip = txt[:8192]
+                self.http.post(self.api + '/api/gw/diag',
+                               json.dumps({'status': st, 'body': snip}).encode(),
+                               {'Content-Type': 'application/json', 'X-See-Key': self.key})
+                log('诊断已上报（HTTP %s, %d 字节）' % (st, len(txt)))
+            except Exception as e:  # noqa: BLE001
+                log('诊断上报异常：%s' % e)
+        elif cmd == 'gw_get':
+            self.cmd_gw_get(payload)
+        elif cmd == 'gw_post':
+            self.cmd_gw_post(payload)
+        elif cmd == 'gw_login':
+            self.cmd_gw_login(payload)
+
+    def cmd_gw_login(self, payload):
+        """模拟网页/浏览器登录光猫，回报结果（暂停采集时验证通道用）。"""
+        try:
+            rep = self.gateway().probe_login()
+        except Exception as e:  # noqa: BLE001
+            rep = {'error': '探测异常：%s' % e}
+        rep['when'] = int(time.time())
+        log('登录探测：%s' % json.dumps(rep, ensure_ascii=False))
+        try:
+            self.http.post(self.api + '/api/gw/diag',
+                           json.dumps({'probe': rep, 'name': 'login'}).encode(),
+                           {'Content-Type': 'application/json', 'X-See-Key': self.key})
+        except Exception as e:  # noqa: BLE001
+            log('登录探测上报异常：%s' % e)
+
+    def cmd_gw_get(self, payload):
+        """按服务器下发的路径列表抓页面（原始前 6KB），一次性回报。"""
+        paths = payload.get('paths') or ([payload.get('path')] if payload.get('path') else [])
+        paths = [str(x) for x in paths if x][:12]
+        if not paths:
+            return
+        gw = self.gateway()
+        pages = {}
+        for pth in paths:
+            st, txt = gw.fetch(pth)
+            pages[pth] = {'status': st, 'len': len(txt), 'body': txt[:6000]}
+            log('抓取 %s → HTTP %s，%d 字节' % (pth, st, len(txt)))
+        try:
+            self.http.post(self.api + '/api/gw/diag',
+                           json.dumps({'pages': pages,
+                                       'name': payload.get('name') or 'pages'}).encode(),
+                           {'Content-Type': 'application/json', 'X-See-Key': self.key})
+            log('页面抓取已上报（%d 个）' % len(pages))
+        except Exception as e:  # noqa: BLE001
+            log('页面抓取上报异常：%s' % e)
+
+    def cmd_gw_post(self, payload):
+        """按服务器下发（路径+表单）做 POST 探测，一次性回报。"""
+        posts = payload.get('posts') or []
+        if not posts and payload.get('path'):
+            posts = [{'path': payload.get('path'), 'form': payload.get('form') or {}}]
+        posts = [p for p in posts if isinstance(p, dict) and p.get('path')][:12]
+        if not posts:
+            return
+        gw = self.gateway()
+        pages = {}
+        for it in posts:
+            pth = str(it.get('path'))
+            form = it.get('form') or {}
+            st, txt = gw.post(pth, form)
+            key = pth + ('?' + urllib.parse.urlencode(form) if form else '')
+            pages[key] = {'status': st, 'len': len(txt), 'body': txt[:6000]}
+            log('POST %s → HTTP %s，%d 字节' % (key, st, len(txt)))
+        try:
+            self.http.post(self.api + '/api/gw/diag',
+                           json.dumps({'pages': pages,
+                                       'name': payload.get('name') or 'post'}).encode(),
+                           {'Content-Type': 'application/json', 'X-See-Key': self.key})
+            log('POST 探测已上报（%d 个）' % len(pages))
+        except Exception as e:  # noqa: BLE001
+            log('POST 探测上报异常：%s' % e)
+
+    def run(self, interval=10, upload_every=10, cfg_every=20):
+        try:
+            import hashlib
+            _h = hashlib.md5(io.open(__file__, 'rb').read()).hexdigest()[:8]
+        except Exception:  # noqa: BLE001
+            _h = '?'
+        log('see 采集器启动：api=%s 采样 %ds / 上传 %ds / 开关 %ds / 代码 %s'
+            % (self.api, interval, upload_every, cfg_every, _h))
         last_up = 0.0
         while True:
+            t0 = time.time()          # 本轮起点：末端的 sleep 只补「剩余时间」，保证周期精确
             try:
                 if time.time() - self.cfg_ts > 300:
                     self.refresh_cfg()
+                elif time.time() - self.on_ts > cfg_every:
+                    self.poll_on()
                 if self.enabled:
+                    if self.was_enabled is False:
+                        log('采集恢复：将重新登录网关（会话可能已被浏览器顶掉）')
+                    self.was_enabled = True
                     self.sample_once()
                 else:
-                    log('采集开关关闭或密码为空，跳过（等待配置变化）')
-                    time.sleep(15)
+                    if self.was_enabled is not False:
+                        self.was_enabled = False
+                        try:
+                            if self.gw is not None:
+                                self.gw.forget()   # 让出光猫：浏览器可登录
+                        except Exception:  # noqa: BLE001
+                            pass
+                    if time.time() - self.off_log > 300:
+                        self.off_log = time.time()
+                        log('采集开关关闭（等待开启，每 %ds 对一次开关）' % cfg_every)
+                    # 暂停期间仍轮询指令通道（只请求服务器，不碰光猫），便于远程验证
+                    if time.time() - self.cmd_ts > 30:
+                        self.cmd_ts = time.time()
+                        self.poll_cmd()
+                    time.sleep(5)
                     continue
-                if time.time() - last_up >= upload_every:
+                # 采样/上传间隔可由服务器配置下发（sampleEvery/uploadEvery，0=沿用启动参数）
+                # 指令通道：20 秒对一次（与 on/off 并行）
+                if time.time() - self.cmd_ts > 20:
+                    self.cmd_ts = time.time()
+                    self.poll_cmd()
+                if time.time() - last_up >= (int(self.cfg.get('uploadEvery') or 0) or upload_every):
                     last_up = time.time()
                     n = self.flush()
-                    if n:
+                    # 上传间隔跟着采样间隔（默认 10s）后，这条日志会每 10 秒一行，
+                    # 所以节流：只有一条以上、或距上次打印过了一分钟才写。
+                    if n and (n > 1 or time.time() - self.up_log >= 60):
+                        self.up_log = time.time()
                         log('已上传 %d 条（buffer 余 %d）' % (n, len(self.buf)))
+                    # 观察页扫描（MAC/厂商）走后台线程，60 秒一次；以前是同步跑，
+                    # 一轮要十几秒，10 秒采样下会把周期直接撑到 13 秒以上。
+                    self.obs_dispatch(int(self.cfg.get('obsEvery') or 0) or OBS_EVERY)
             except KeyboardInterrupt:
                 log('收到中断，退出')
                 self.flush()
@@ -367,7 +905,16 @@ class Collector(object):
             except Exception as e:  # noqa: BLE001
                 log('循环异常（忽略并继续）：%s' % e)
                 time.sleep(5)
-            time.sleep(interval)
+            # 按「整轮周期」计时：采集本身要十几秒，直接 sleep(N) 会变成 N+十几秒一轮
+            _iv = int(self.cfg.get('sampleEvery') or 0) or interval
+            _cost = time.time() - t0
+            if time.time() - self.cost_log >= 60:
+                self.cost_log = time.time()
+                tl = self.t_last or {}
+                log('本轮耗时 %.1fs / 周期 %ds（设备表 %.1f · 速率 %.1f · CPU %.1f · %d 台 · 登录累计 %d 次）'
+                    % (_cost, _iv, tl.get('ai') or 0, tl.get('dv') or 0, tl.get('cpu') or 0,
+                       tl.get('devs') or 0, getattr(self.gw, 'logins', 0) if self.gw else 0))
+            time.sleep(max(0.5, _iv - _cost))
 
 
 def main():
@@ -379,7 +926,9 @@ def main():
     ap.add_argument('--gw-user', default='', help='覆盖配置里的网关账号')
     ap.add_argument('--gw-pass', default='', help='覆盖配置里的网关密码（建议用服务器配置，别写在这里）')
     ap.add_argument('--interval', type=int, default=10)
-    ap.add_argument('--upload-every', type=int, default=60)
+    ap.add_argument('--upload-every', type=int, default=10,
+                    help='多久上传一次（秒）；默认跟采样间隔一样，实时页才不会慢半分钟')
+    ap.add_argument('--cfg-every', type=int, default=20, help='多久对一次采集开关（秒）')
     ap.add_argument('--once', action='store_true', help='只采一次（配合 --no-upload 排查）')
     ap.add_argument('--no-upload', action='store_true')
     ap.add_argument('--selfcheck', action='store_true')
@@ -411,7 +960,7 @@ def main():
         return 0
     if not c.refresh_cfg():
         log('首次读配置失败，仍继续（会周期性重试）')
-    return c.run(a.interval, a.upload_every)
+    return c.run(a.interval, a.upload_every, a.cfg_every)
 
 
 if __name__ == '__main__':
