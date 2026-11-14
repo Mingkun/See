@@ -25,6 +25,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -32,6 +33,11 @@ import urllib.request
 
 UA = 'Mozilla/5.0 (Linux; Android 14)'
 REL_LOGIN = 120          # 网关会话过期（秒），与 app 一致
+LOGIN_GAP = 20           # 两次登录的最小间隔（秒）：10 秒轮询下防止「取不到就重登」连环刷，
+                         # 网关只允许一个管理员会话，连续 POST /cgi-bin/luci 会自己顶自己
+ALLINFO_EVERY = 3        # 设备表（allInfo）几轮取一次：名字/链路类型几乎不变，没必要每轮都拉
+OBS_EVERY = 60           # 观察页（MAC/厂商）扫描间隔：ping 全网段+SSDP+mDNS 要十几秒，
+                         # 必须离开采样主循环（10 秒轮询下它会吃满整个周期）
 ABSENT_TTL = 25 * 3600   # 缺席超过这个时间就不再补 present=0（与 app 的 25h 同口径）
 
 
@@ -88,8 +94,12 @@ class Gateway(object):
         self.pw = pw
         self.http = Http(timeout=8.0)
         self.login_ts = 0.0
+        self.logins = 0
 
     def login(self):
+        # 刚登过就别再登：同一会话连着 POST 会把上一个会话顶掉，等于自废 cookie
+        if self.login_ts and time.time() - self.login_ts < LOGIN_GAP:
+            return False
         form = urllib.parse.urlencode({'username': self.user, 'psd': self.pw}).encode()
         try:
             self.http.post('http://%s/cgi-bin/luci' % self.ip, form,
@@ -98,6 +108,8 @@ class Gateway(object):
             log('网关登录请求异常：%s' % e)
             return False
         self.login_ts = time.time()
+        self.logins += 1
+        log('网关登录（本进程第 %d 次）：会话缺失或被顶掉' % self.logins)
         return True
 
     def allinfo(self):
@@ -115,6 +127,56 @@ class Gateway(object):
             except Exception as e:  # noqa: BLE001
                 return -1, '请求异常：%s' % e
         return st, txt
+
+    def _raw_post(self, path, body):
+        try:
+            return self.http.post('http://%s%s' % (self.ip, path), body,
+                                  {'Content-Type': 'application/x-www-form-urlencoded',
+                                   'User-Agent': UA})
+        except Exception as e:  # noqa: BLE001
+            return -1, '请求异常：%s' % e
+
+    def post(self, path, form):
+        """按需 POST 表单，返回 (status, 文本)。"""
+        # 不按时间预登录：先带已有 cookie 请求，掉登录页再重登（省登录次数）
+        body = urllib.parse.urlencode(form or {}).encode()
+        st, txt = self._raw_post(path, body)
+        if 'name="psd"' in txt:
+            self.login()
+            st, txt = self._raw_post(path, body)
+        return st, txt
+
+    def devinfo_speeds(self):
+        """POST devInfo(type=0) 取每台设备的实时速率 -> ({ip: (up, down)}, count, status)。
+
+        网关页面（admin/device/pc）就是这么取速率的：XHR.poll 带 {type:'0'}，
+        回 json.count + json.dev1..devN，字段 upSpeed/downSpeed（单位 bps）。
+        allInfo 的 upSpeed/downSpeed 在这台固件上恒为 0，故速率以本接口为准。
+        """
+        st, txt = self.post('/cgi-bin/luci/admin/device/devInfo', {'type': '0'})
+        out = {}
+        if st != 200 or not txt.lstrip().startswith('{'):
+            return out, 0, st
+        try:
+            j = json.loads(txt)
+        except Exception:  # noqa: BLE001
+            return out, 0, st
+        try:
+            n = int(j.get('count') or 0)
+        except Exception:
+            n = 0
+        for i in range(1, n + 1):
+            d = j.get('dev%d' % i) or {}
+            if not isinstance(d, dict):
+                continue
+            ip = str(d.get('ip') or '')
+            if not ip or ip == '--':
+                continue
+            try:
+                out[ip] = (float(d.get('upSpeed') or 0), float(d.get('downSpeed') or 0))
+            except (TypeError, ValueError):
+                continue
+        return out, n, st
 
     # 链路类型不再走 devInfo（要 token、按 IP 对表、60s 一刷、一半失败时整表被
     # 替换——历史上链路来回翻/大量空值就是这么来的）。改直接用 allInfo 记录所在
@@ -172,6 +234,14 @@ class Collector(object):
         self.on_ts = 0.0          # 最近一次「只拉开关」的时间
         self.off_log = 0.0        # 暂停期间日志节流
         self.up_log = 0.0         # 上传日志节流（间隔缩小后不然刷屏）
+        self.rnd = 0              # 采样轮次（设备表隔轮取用）
+        self.cost_log = 0.0       # 「本轮耗时」日志节流
+        self.dev_cache = []       # 缓存的设备表（allInfo 解析结果）
+        self.ai_ts = 0.0          # 设备表缓存时间
+        self.t_last = {}          # 上一轮各步骤耗时（给日志用）
+        self.http_obs = Http(timeout=20.0)   # 观察上报专用连接（扫描在后台线程，避免与采样抢 self.http）
+        self.obs_ts = 0.0         # 上次观察扫描时间
+        self.obs_busy = False     # 后台扫描是否还在跑
 
     # ---------- 服务器：配置 ----------
     def refresh_cfg(self):
@@ -256,16 +326,52 @@ class Collector(object):
     # ---------- 一轮采样 ----------
     def sample_once(self):
         gw = self.gateway()
-        st, txt = gw.allinfo()
-        if not txt.lstrip().startswith('{'):
-            snip = ' '.join(txt.split())[:80]
-            log('网关未返回数据（HTTP %s）：%s' % (st, snip or '（空）'))
-            return 0
+        self.rnd = getattr(self, 'rnd', 0) + 1
+        t_ai = t_dv = 0.0
+        # 设备表（名字/链路类型）几十分钟都不变，没必要每轮都拉：
+        # allInfo 一次好几秒，改成 3 轮一次（约 30 秒），中间直接用缓存，
+        # 每轮只留 devInfo（速率，必须实时）这一次往返。
+        need_ai = ((self.rnd % ALLINFO_EVERY == 1) or not self.dev_cache
+                   or (time.time() - self.ai_ts > 180))
+        if need_ai:
+            _t = time.time()
+            st, txt = gw.allinfo()
+            t_ai = time.time() - _t
+            if txt.lstrip().startswith('{'):
+                try:
+                    self.dev_cache = parse_allinfo(txt)
+                    self.ai_ts = time.time()
+                except Exception as e:  # noqa: BLE001
+                    log('解析 allInfo 失败：%s' % e)
+            elif self.dev_cache:
+                log('allInfo 暂不可用（HTTP %s），沿用 %d 秒前的设备表'
+                    % (st, int(time.time() - self.ai_ts)))
+            else:
+                snip = ' '.join(txt.split())[:80]
+                log('网关未返回数据（HTTP %s）：%s' % (st, snip or '（空）'))
+                return 0
+        devs = [dict(d) for d in self.dev_cache]   # 拷贝：下面要按 IP 覆盖速率
+
+        # 速率：devInfo(type=0) 才是真数据源（allInfo 的 up/down 恒为 0）
+        speeds, devcnt, dst = {}, 0, -1
+        _t = time.time()
         try:
-            devs = parse_allinfo(txt)
+            speeds, devcnt, dst = gw.devinfo_speeds()
         except Exception as e:  # noqa: BLE001
-            log('解析 allInfo 失败：%s' % e)
-            return 0
+            log('devInfo 速率读取失败：%s' % e)
+        t_dv = time.time() - _t
+        if speeds:
+            hit = 0
+            for d in devs:
+                sp = speeds.get(d.get('ip') or '')
+                if sp is not None:
+                    # devInfo 的 upSpeed/downSpeed 单位是 bps（光猫页面就是 Kb/s），
+                    # 数据库/前端统一按字节/秒（B/s）存，故除以 8。
+                    d['up'], d['down'] = sp[0] / 8.0, sp[1] / 8.0
+                    hit += 1
+            if hit:
+                log('速率来自 devInfo：%d/%d 台有值（网关报 %d 台）' % (hit, len(devs), devcnt))
+        self.t_last = {'ai': t_ai, 'dv': t_dv, 'devs': len(devs)}
 
         now = int(time.time())
         n = 0
@@ -438,8 +544,8 @@ class Collector(object):
                 d['type'] = banners[ip]
         body = json.dumps({'devices': devs}, ensure_ascii=False).encode()
         try:
-            st, txt = self.http.post(self.api + '/api/obs/report', body,
-                                     {'Content-Type': 'application/json', 'X-See-Key': self.key})
+            st, txt = self.http_obs.post(self.api + '/api/obs/report', body,
+                                         {'Content-Type': 'application/json', 'X-See-Key': self.key})
             j = json.loads(txt)
             if not j.get('ok'):
                 log('观察上报被拒：%s' % j.get('error'))
@@ -449,6 +555,24 @@ class Collector(object):
             return 0
         log('观察上报：%d 台（MAC/厂商）' % len(devs))
         return len(devs)
+
+    def obs_dispatch(self, every=OBS_EVERY):
+        """观察页扫描放后台线程：ping 全网段+SSDP+mDNS 要十几秒，绝不能卡住 10 秒采样。"""
+        now = time.time()
+        if self.obs_busy or now - self.obs_ts < max(10, int(every or 0)):
+            return
+        self.obs_ts = now
+        self.obs_busy = True
+
+        def _work():
+            try:
+                self.report_obs()
+            except Exception as e:  # noqa: BLE001
+                log('观察上报异常（忽略）：%s' % e)
+            finally:
+                self.obs_busy = False
+
+        threading.Thread(target=_work, daemon=True).start()
 
     def selfcheck(self):
         ok = True
@@ -483,6 +607,7 @@ class Collector(object):
         log('see 采集器启动：api=%s 采样 %ds / 上传 %ds / 开关 %ds'
             % (self.api, interval, upload_every, cfg_every))
         last_up = 0.0
+        last_t = time.time()
         while True:
             try:
                 if time.time() - self.cfg_ts > 300:
@@ -505,7 +630,9 @@ class Collector(object):
                     if n and (n > 1 or time.time() - self.up_log >= 60):
                         self.up_log = time.time()
                         log('已上传 %d 条（buffer 余 %d）' % (n, len(self.buf)))
-                    self.report_obs()   # 顺带上报局域网发现（观察页数据源）
+                    # 观察页扫描（MAC/厂商）走后台线程，60 秒一次；以前是同步跑，
+                    # 一轮要十几秒，10 秒采样下会把周期直接撑到 13 秒以上。
+                    self.obs_dispatch(int(self.cfg.get('obsEvery') or 0) or OBS_EVERY)
             except KeyboardInterrupt:
                 log('收到中断，退出')
                 self.flush()
@@ -513,7 +640,17 @@ class Collector(object):
             except Exception as e:  # noqa: BLE001
                 log('循环异常（忽略并继续）：%s' % e)
                 time.sleep(5)
+            # 本轮耗时（采集本身，不含固定等待）：周期装不下就得减请求，
+            # 否则实际间隔会变成「耗时 + interval」，采样次数白白变少。
+            _cost = time.time() - last_t
+            if _cost > 1.0 and time.time() - self.cost_log >= 60:
+                self.cost_log = time.time()
+                tl = self.t_last or {}
+                log('本轮耗时 %.1fs / 周期 %ds（设备表 %.1f · 速率 %.1f · %d 台 · 登录累计 %d 次）'
+                    % (_cost, interval, tl.get('ai') or 0, tl.get('dv') or 0,
+                       tl.get('devs') or 0, getattr(self.gw, 'logins', 0) if self.gw else 0))
             time.sleep(interval)
+            last_t = time.time()
 
 
 def main():
