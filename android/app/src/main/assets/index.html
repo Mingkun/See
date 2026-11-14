@@ -273,12 +273,12 @@ button, button *, .btn, .btn *, .tab, .tab * { -webkit-user-select:none; user-se
 <body>
 <div class="wrap">
   <header>
-    <h1>📡 see · 局域网监控</h1>
+    <h1 style="white-space:nowrap">📡 see · 局域网监控<span id="topoCpu" style="font-size:var(--fs-sm);font-weight:500;color:var(--muted);white-space:nowrap;margin-left:2px"></span></h1>
     <div class="hrow"><button id="sysBtn" onclick="openSys()" class="iconbtn">⚙</button></div>
   </header>
   <div id="viewMon">
   <div class="panel" id="topoPanel">
-    <div class="stline" style="padding-top:10px">在线 <b id="cOn">–</b> · 网络 <b id="topoSum">–</b> · ↓ <b class="dn" id="cDn">–</b> · ↑ <b class="up" id="cUp">–</b> · <b id="cDay">–</b></div>
+    <div class="stline" style="padding-top:10px">在线 <b id="cOn">–</b> · ↓ <b class="dn" id="cDn">–</b> · ↑ <b class="up" id="cUp">–</b> · <b id="cDay">–</b></div>
     <div class="topo-wrap"><svg id="topoSvg" class="topo-svg" viewBox="0 0 340 40"></svg></div>
     <div class="hint" id="topoHint"></div>
   </div>
@@ -1384,17 +1384,20 @@ function isApNode(d){
 }
 var _cpuTs = 0;
 function loadGwStats(){
-  var o = document.getElementById('topoSum'); if (!o) return;
+  var o = document.getElementById('topoCpu'); if (!o) return;
   var now = Date.now();
   if (now - _cpuTs < 8000) return;          // 页面每 2 秒刷新，这里 8 秒内不重复请求
   _cpuTs = now;
+  var paint = function(c, col){
+    o.innerHTML = '（光猫CPU：<b style="font-weight:650;color:' + col + ';font-variant-numeric:tabular-nums">'
+      + (c === null ? '–' : c + '%') + '</b>）';
+  };
   apiFetch(API + '/gw/stats?secs=60', {}).then(function(r){ return r.json(); }).then(function(j){
-    if (!j || !j.ok || !j.latest || j.age > 180){ o.textContent = '–'; o.style.color = ''; return; }
+    if (!j || !j.ok || !j.latest || j.age > 180){ paint(null, '#69737f'); return; }
     var c = Number(j.latest.cpu);
-    if (!isFinite(c) || c < 0){ o.textContent = '–'; o.style.color = ''; return; }
+    if (!isFinite(c) || c < 0){ paint(null, '#69737f'); return; }
     c = Math.round(c);
-    o.textContent = c + '%';
-    o.style.color = c >= 85 ? '#dc2626' : (c >= 60 ? '#d97706' : '#0e7490');
+    paint(c, c >= 85 ? '#dc2626' : (c >= 60 ? '#d97706' : '#0f766e'));
   }).catch(function(){});
 }
 function topoPaint(){
