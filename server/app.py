@@ -1469,8 +1469,9 @@ def api_gw_usegrid():
     """分析页「使用时间线」：多设备 × 10 分钟桶的判定依据指标。
 
     每桶只统计 present=1 的采样，指标口径与前端场景分析（anSceneCalc）完全一致：
-    上行小包=0.5–15K 的上行采样个数、静默=合计<2K 占比、中位数、变异系数、合计字节。
-    「是否有人使用」的判定在前端 ugVerdict（阈值同 anSceneVerdict）。
+    上行小包=0.5–15K 的上行采样个数、静默=合计<2K 占比、中位数、变异系数、合计字节、单次下行峰值。
+    「是否有人使用」的判定在前端 ugVerdict（阈值同 anSceneVerdict）：
+    小包≥5 还必须有内容消费（下行中位≥3K 或单次下行≥300KB），否则是挂机/心跳。
     桶只到最近一个完整的 10 分钟边界，当前未走完的桶不显示。
     """
     if request.method == 'OPTIONS':
@@ -1522,8 +1523,9 @@ def api_gw_usegrid():
             cv = (var ** 0.5 / mt) if mt > 0 else 0.0
             upsmall = sum(1 for u in us if 512 < u < 15360)
             ratio = (med_u / med_d) if med_d > 1 else (99.0 if med_u > 1 else 1.0)
+            mxd = max(ds)
             bk.append([n, round(med_u), round(med_d), round(ratio, 2), round(q, 2),
-                       round(cv, 2), upsmall, round(mt * 10 * n), round(mt)])
+                       round(cv, 2), upsmall, round(mt * 10 * n), round(mt), round(mxd)])
         out.append({'key': key, 'name': ov.get(key, names.get(key, '')),
                     'ip': ips.get(key, ''), 'bk': bk})
     return jsonify(ok=True, frm=frm, now=now, step=600, nb=nb, hours=hours, devs=out)

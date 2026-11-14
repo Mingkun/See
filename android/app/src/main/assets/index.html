@@ -1940,11 +1940,12 @@ function anSceneCalc(j){
   var t0 = now - SCN_WIN;
   var ss = (j.samples || []).filter(function(s){ return s[0] >= t0 && s[3]; });
   if (!ss.length) return null;
-  var n = ss.length, su = 0, sd = 0, mx = 0, q = 0, arr = [], ups = [], dns = [], upSmall = 0;
+  var n = ss.length, su = 0, sd = 0, mx = 0, q = 0, arr = [], ups = [], dns = [], upSmall = 0, mxd = 0;
   for (var i = 0; i < n; i++){
     var u = ss[i][1], d = ss[i][2], t = u + d;
     su += u; sd += d; arr.push(t); ups.push(u); dns.push(d);
     if (t > mx) mx = t;
+    if (d > mxd) mxd = d;
     if (u > 512 && u < 15360) upSmall++;   // 「人的签名」：0.5–15 K/s 的上行小请求包
   }
   var mu = su / n, md = sd / n, mt = mu + md, cv = 0;
@@ -1955,7 +1956,7 @@ function anSceneCalc(j){
   }
   for (var z = 0; z < n; z++) if (arr[z] < 2048) q++;
   var medU = scnMedian(ups), medD = scnMedian(dns);
-  return { n: n, mu: mu, md: md, mt: mt, medU: medU, medD: medD, cv: cv, q: q / n, mx: mx,
+  return { n: n, mu: mu, md: md, mt: mt, medU: medU, medD: medD, cv: cv, q: q / n, mx: mx, mxd: mxd,
            upSmall: upSmall,
            ratio: (medD > 1 ? medU / medD : (medU > 1 ? 99 : 1)),
            pr: (mt > 0 ? mx / mt : 0), bytes: mt * 10 * n };
@@ -1987,17 +1988,25 @@ function anSceneClass(s){
 }
 function anSceneVerdict(s, cl){
   // 操作判定（与场景独立）：上行小包 = 点按/发消息触发的小请求，自动播放没有它。
-  // 通话/聊天场景必然有人，小包不足时也直接判「人在使用」。
+  // 但小包必须配内容消费（下行中位≥3K 或单次下行≥300KB）才算人：游戏挂机/长连接保活
+  // 也有周期小包（实测原神界面挂机 7 个小包/10 分钟、但 maxD 仅 123K、下行中位 0.2K）。
+  // 通话场景必然有人，小包不足时也直接判「人在使用」。
+  var content = (s.medD >= 3072 || s.mxd >= 307200);
   if (s.mt < 1536) return { c: 'c-idle', t: '无人操作（待机）', d: '整窗无流量。' };
-  if (s.upSmall >= 5)
+  if (cl.k === 'call' || cl.k === 'vcall')
+    return { c: 'c-busy', t: '人在使用', d: '通话场景必然有人在线。' };
+  if (s.upSmall >= 5){
+    if (!content)
+      return { c: 'c-idle', t: '无人操作（挂机/心跳）', d: '上行小包是周期性心跳或遥测（游戏挂机、长连接保活），没有内容消费，不是人在操作。' };
     return s.q >= 0.7
       ? { c: 'c-chill', t: '间歇拿起使用', d: '大部分时间静默，偶尔一次尖峰加几个小包。' }
       : { c: 'c-busy', t: '人在使用', d: '上行小请求频繁出现，是点按/发消息的签名。' };
-  if (cl.k === 'call' || cl.k === 'vcall')
-    return { c: 'c-busy', t: '人在使用', d: '通话场景必然有人在线。' };
+  }
   if (s.upSmall >= 2)
-    return { c: 'c-chill', t: '前台活跃', d: '只有心跳级小包：亮着屏但没怎么动，或长连接保活。' };
-  return { c: 'c-idle', t: '无交互（自动/后台）', d: '上行干净，内容在自己跑，人可能不在。' };
+    return content
+      ? { c: 'c-chill', t: '前台活跃', d: '只有心跳级小包：亮着屏但没怎么动，或长连接保活。' }
+      : { c: 'c-idle', t: '无交互（自动/后台）', d: '上行干净，内容自己在跑，人可能不在。' };
+  return { c: 'c-idle', t: '无交互（自动/后台）', d: '上行干净，内容自己在跑，人可能不在。' };
 }
 function anSceneRender(j){
   var box = document.getElementById('anScene');
@@ -2029,15 +2038,21 @@ var UG = { devs: [], win: 24, last: null, inited: false, grid: null, geom: null 
 var UG_COLORS = ['#2563eb', '#16a34a', '#f59e0b', '#dc2626', '#7c3aed', '#0891b2', '#db2777', '#65a30d'];
 function ugMsg(t){ var e = document.getElementById('ugSub'); if (e) e.textContent = t; }
 function ugVerdict(b){
-  // b = [n, medU, medD, ratio, q, cv, upSmall, bytes, mt]，阈值同 anSceneVerdict
+  // b = [n, medU, medD, ratio, q, cv, upSmall, bytes, mt, maxD]，阈值同 anSceneVerdict
+  // 小包是「人的签名」但必须有内容消费（下行中位≥3K 或单次下行≥300KB）：
+  // 游戏挂机/长连接保活也有周期小包，但没有内容（实测原神界面挂机 maxD 123K、真人拿起 731K）
   if (!b || !b[0]) return { t: '无数据', used: 0 };
   var mt = b[8], ratio = b[3], q = b[4], upSmall = b[6];
+  var content = (b[2] >= 3072 || (b[9] || 0) >= 307200);
   if (mt < 1536) return { t: '无人操作（待机）', used: 0 };
   if (ratio > 0.45 && ratio < 2.2 && b[1] > 3072 && b[2] > 3072 && q < 0.08)
     return { t: '人在使用（通话）', used: 1 };
-  if (upSmall >= 5)
+  if (upSmall >= 5){
+    if (!content) return { t: '无人操作（挂机/心跳）', used: 0 };
     return q >= 0.7 ? { t: '间歇拿起使用', used: 1 } : { t: '人在使用', used: 1 };
-  if (upSmall >= 2) return { t: '前台活跃', used: 1 };
+  }
+  if (upSmall >= 2)
+    return content ? { t: '前台活跃', used: 1 } : { t: '无交互（自动/后台）', used: 0 };
   return { t: '无交互（自动/后台）', used: 0 };
 }
 function ugDevItems(){
