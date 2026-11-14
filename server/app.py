@@ -1214,7 +1214,7 @@ def api_gw_cmd():
     if request.method == 'OPTIONS':
         return _opt('GET, POST, OPTIONS')
     kind = _auth_kind()
-    if kind not in ('key', 'session'):
+    if kind not in ('key', 'sess'):
         return _deny()
     if request.method == 'POST':
         data = request.get_json(silent=True) or {}
@@ -1222,7 +1222,7 @@ def api_gw_cmd():
             _GW_CMD['cmd'] = ''
             return jsonify(ok=True)
         # 会话发指令（网页/APP 按钮）；采集器（key）只允许 done 回报
-        if kind in ('session', 'key') and data.get('cmd') in ('gw_relogin', 'gw_diag'):
+        if kind in ('sess', 'key') and data.get('cmd') in ('gw_relogin', 'gw_diag'):
             _GW_CMD['cmd'] = data['cmd']
             _GW_CMD['ts'] = int(time.time())
             return jsonify(ok=True)
