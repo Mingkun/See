@@ -1223,10 +1223,10 @@ def api_gw_cmd():
             _GW_CMD['payload'] = {}
             return jsonify(ok=True)
         # 会话发指令（网页/APP 按钮）；采集器（key）只允许 done 回报
-        if kind in ('sess', 'key') and data.get('cmd') in ('gw_relogin', 'gw_diag', 'gw_get'):
+        if kind in ('sess', 'key') and data.get('cmd') in ('gw_relogin', 'gw_diag', 'gw_get', 'gw_post'):
             _GW_CMD['cmd'] = data['cmd']
             _GW_CMD['ts'] = int(time.time())
-            _GW_CMD['payload'] = {k: data.get(k) for k in ('path', 'paths', 'name') if data.get(k)}
+            _GW_CMD['payload'] = {k: data.get(k) for k in ('path', 'paths', 'posts', 'form', 'name') if data.get(k)}
             return jsonify(ok=True)
         return jsonify(ok=False, error='无效指令'), 400
     # GET：采集器取指令（one-shot 不清——由 POST done 清，防采集器没收到）

@@ -132,6 +132,57 @@ class Gateway(object):
         except Exception as e:  # noqa: BLE001
             return -1, '请求异常：%s' % e
 
+    def post(self, path, form):
+        """按需 POST 表单（诊断用），返回 (status, 文本)。"""
+        if time.time() - self.login_ts > REL_LOGIN:
+            self.login()
+        body = urllib.parse.urlencode(form or {}).encode()
+        st, txt = self._raw_post(path, body)
+        if 'name="psd"' in txt:
+            self.login()
+            st, txt = self._raw_post(path, body)
+        return st, txt
+
+    def _raw_post(self, path, body):
+        try:
+            return self.http.post('http://%s%s' % (self.ip, path), body,
+                                  {'Content-Type': 'application/x-www-form-urlencoded',
+                                   'User-Agent': UA})
+        except Exception as e:  # noqa: BLE001
+            return -1, '请求异常：%s' % e
+
+    def devinfo_speeds(self):
+        """POST devInfo(type=0) 取每台设备的实时速率 -> ({ip: (up, down)}, count, status)。
+
+        网关页面（admin/device/pc）就是这么取速率的：XHR.poll 带 {type:'0'}，
+        回 json.count + json.dev1..devN，字段 upSpeed/downSpeed（单位 bps）。
+        allInfo 的 upSpeed/downSpeed 在这台固件上恒为 0，故速率以本接口为准。
+        """
+        st, txt = self.post('/cgi-bin/luci/admin/device/devInfo', {'type': '0'})
+        out = {}
+        if st != 200 or not txt.lstrip().startswith('{'):
+            return out, 0, st
+        try:
+            j = json.loads(txt)
+        except Exception:  # noqa: BLE001
+            return out, 0, st
+        try:
+            n = int(j.get('count') or 0)
+        except Exception:  # noqa: BLE001
+            n = 0
+        for i in range(1, n + 1):
+            d = j.get('dev%d' % i) or {}
+            if not isinstance(d, dict):
+                continue
+            ip = str(d.get('ip') or '')
+            if not ip or ip == '--':
+                continue
+            try:
+                out[ip] = (float(d.get('upSpeed') or 0), float(d.get('downSpeed') or 0))
+            except (TypeError, ValueError):
+                continue
+        return out, n, st
+
     def allinfo(self):
         """返回 (status, 文本)。文本以 { 开头才算登录成功。"""
         if time.time() - self.login_ts > REL_LOGIN:
@@ -205,6 +256,7 @@ class Collector(object):
         self.on_ts = 0.0          # 最近一次「只拉开关」的时间
         self.off_log = 0.0        # 暂停期间日志节流
         self.up_log = 0.0         # 上传日志节流（间隔缩小后不然刷屏）
+        self.dev_logged = False   # devInfo 失败日志只打一次
 
     # ---------- 服务器：配置 ----------
     def refresh_cfg(self):
@@ -301,6 +353,25 @@ class Collector(object):
         except Exception as e:  # noqa: BLE001
             log('解析 allInfo 失败：%s' % e)
             return 0
+
+        # 速率：devInfo(type=0) 才是真数据源（allInfo 的 up/down 恒为 0）
+        speeds, devcnt, dst = {}, 0, -1
+        try:
+            speeds, devcnt, dst = gw.devinfo_speeds()
+        except Exception as e:  # noqa: BLE001
+            log('devInfo 速率读取失败：%s' % e)
+        if speeds:
+            hit = 0
+            for d in devs:
+                sp = speeds.get(d.get('ip') or '')
+                if sp is not None:
+                    d['up'], d['down'] = sp
+                    hit += 1
+            if hit:
+                log('速率来自 devInfo：%d/%d 台有值（网关报 %d 台）' % (hit, len(devs), devcnt))
+        elif not self.dev_logged:
+            self.dev_logged = True
+            log('devInfo 未取到速率（HTTP %s，count=%s）' % (dst, devcnt))
 
         now = int(time.time())
         n = 0
@@ -551,6 +622,8 @@ class Collector(object):
                 log('诊断上报异常：%s' % e)
         elif cmd == 'gw_get':
             self.cmd_gw_get(payload)
+        elif cmd == 'gw_post':
+            self.cmd_gw_post(payload)
 
     def cmd_gw_get(self, payload):
         """按服务器下发的路径列表抓页面（原始前 6KB），一次性回报。"""
@@ -572,6 +645,32 @@ class Collector(object):
             log('页面抓取已上报（%d 个）' % len(pages))
         except Exception as e:  # noqa: BLE001
             log('页面抓取上报异常：%s' % e)
+
+    def cmd_gw_post(self, payload):
+        """按服务器下发（路径+表单）做 POST 探测，一次性回报。"""
+        posts = payload.get('posts') or []
+        if not posts and payload.get('path'):
+            posts = [{'path': payload.get('path'), 'form': payload.get('form') or {}}]
+        posts = [p for p in posts if isinstance(p, dict) and p.get('path')][:12]
+        if not posts:
+            return
+        gw = self.gateway()
+        pages = {}
+        for it in posts:
+            pth = str(it.get('path'))
+            form = it.get('form') or {}
+            st, txt = gw.post(pth, form)
+            key = pth + ('?' + urllib.parse.urlencode(form) if form else '')
+            pages[key] = {'status': st, 'len': len(txt), 'body': txt[:6000]}
+            log('POST %s → HTTP %s，%d 字节' % (key, st, len(txt)))
+        try:
+            self.http.post(self.api + '/api/gw/diag',
+                           json.dumps({'pages': pages,
+                                       'name': payload.get('name') or 'post'}).encode(),
+                           {'Content-Type': 'application/json', 'X-See-Key': self.key})
+            log('POST 探测已上报（%d 个）' % len(pages))
+        except Exception as e:  # noqa: BLE001
+            log('POST 探测上报异常：%s' % e)
 
     def run(self, interval=10, upload_every=10, cfg_every=20):
         log('see 采集器启动：api=%s 采样 %ds / 上传 %ds / 开关 %ds'
