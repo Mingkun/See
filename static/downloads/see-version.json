@@ -1,1 +1,1 @@
-{"versionCode": 182, "versionName": "3.71", "size": 2128166, "md5": "a23d34de1516c7a82edfcd2d1c72d398", "note": "分时表「峰值」列改名；采样周期降为 10 秒（采集器同步更新）", "apkUrl": "https://5130599.best/see/downloads/see-android.apk"}
+{"versionCode": 183, "versionName": "3.72", "size": 2128170, "md5": "b4b29e006ba763fe2eb8fb7bab527298", "note": "分时表「平均速率」= 该时段内所有采样的算术平均（采到几次算几次）；「峰值」= 该时段最高单次采样", "apkUrl": "https://5130599.best/see/downloads/see-android.apk"}

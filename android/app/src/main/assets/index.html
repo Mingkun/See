@@ -1890,7 +1890,7 @@ function anFmtDur(min){ if (min < 60) return Math.round(min) + '分'; return Mat
 function anRender(j){
   AN.last = j;
   var sp = j.speed || [], pr = j.present || [], hs = j.has || [];
-  var a5 = j.avg5 || null, pk1 = j.peak1 || null;   // 近5次采样均值 / 单次采样最高值（老服务端没有则回退）
+  var pk1 = j.peak1 || null;   // 该分钟最高的一次采样（老服务端没有则回退为格均值）
   var upA = j.up || null, dnA = j.down || null;   // 新服务端会分别给上行/下行，旧服务端回退为均分
   var n = sp.length || j.minutes || 1440;
   var from = j.frm || j.from || 0;
@@ -2017,8 +2017,9 @@ function anRender(j){
     var kEnd = Math.min(h3 + 1, n);
     var tot = 0, mx = 0, ct2 = 0, any2 = 0, pr2 = 0;
     for (var k2 = h3; k2 < kEnd; k2++){ if (hs[k2]) any2 = 1; if (pr[k2]) pr2 = 1; tot += sp[k2]; if (sp[k2] > mx) mx = sp[k2]; ct2++; }
-    // 平均速率=最近 5 次采样的均值；峰值=该分钟里最高的一次采样
-    var avgV = a5 ? (a5[h3] || 0) : (ct2 ? tot / ct2 : 0);
+    // 平均速率=该时段（这一分钟）内所有采样的算术平均：采到几次就除几次
+    // 峰值=该分钟里最高的一次采样
+    var avgV = ct2 ? tot / ct2 : 0;
     var pkV = pk1 ? (pk1[h3] || 0) : mx;
     var st;
     if (!any2) st = '<span class="sub">无</span>';

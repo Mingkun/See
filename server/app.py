@@ -1434,24 +1434,9 @@ def api_gw_series():
             speed[i] = speed[i] / cnt[i]
             sup[i] = sup[i] / cnt[i]
             sdn[i] = sdn[i] / cnt[i]
-    # 单次速率：该分钟里最高的那一次采样（30 秒一采，故一分钟约 2 次）
-    # 近5次均值：以该分钟结束时为终点，回看最近 5 次采样求平均（跨分钟连续）
-    peak1 = [0.0] * n
-    avg5 = [0.0] * n
-    buf = []
-    last_i = -99
-    for i in range(n):
-        peak1[i] = max(samp[i]) if samp[i] else 0.0
-        if i - last_i > 3:      # 断档超过 3 分钟：之前那几次采样不再算「最近五次」
-            buf = []
-        if not samp[i]:         # 这一分钟没有采样（设备不在线/没数据）：不显示旧均值
-            avg5[i] = 0.0
-            continue
-        last_i = i
-        buf.extend(samp[i])
-        if len(buf) > 5:
-            del buf[:len(buf) - 5]
-        avg5[i] = sum(buf) / len(buf)
+    # 峰值：该分钟里最高的那一次采样（10 秒一采，故一分钟约 6 次）
+    # 「平均速率」不在这里算：前端直接用 speed[i]（该分钟所有采样的算术平均）
+    peak1 = [max(v) if v else 0.0 for v in samp]
     mkeys = _merge_keys(_merge_map(), key)
     for k in store.gw_keys(frm):
         if k['key'] in mkeys:
@@ -1460,7 +1445,7 @@ def api_gw_series():
     name = _load_names().get(key, name)
     return jsonify(ok=True, key=key, name=name, ip=ip, frm=frm, now=now, end=end, minutes=n,
                    speed=speed, up=sup, down=sdn, present=pres, has=has,
-                   avg5=avg5, peak1=peak1)
+                   peak1=peak1)
 
 
 @app.route('/api/gw/live', methods=['OPTIONS', 'GET'])
