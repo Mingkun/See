@@ -31,7 +31,7 @@ import urllib.parse
 import urllib.request
 
 UA = 'Mozilla/5.0 (Linux; Android 14)'
-REL_LOGIN = 120          # 网关会话过期（秒），与 app 一致
+REL_LOGIN = 3600         # 兜底重登阈值（秒）：正常靠 cookie 保持会话，掉登录页才重登
 ABSENT_TTL = 25 * 3600   # 缺席超过这个时间就不再补 present=0（与 app 的 25h 同口径）
 
 
@@ -88,6 +88,7 @@ class Gateway(object):
         self.pw = pw
         self.http = Http(timeout=8.0)
         self.login_ts = 0.0
+        self.logins = 0
 
     def login(self):
         form = urllib.parse.urlencode({'username': self.user, 'psd': self.pw}).encode()
@@ -98,6 +99,8 @@ class Gateway(object):
             log('网关登录请求异常：%s' % e)
             return False
         self.login_ts = time.time()
+        self.logins += 1
+        log('网关登录（本进程第 %d 次）：会话缺失或被顶掉' % self.logins)
         return True
 
     def relogin(self):
@@ -117,8 +120,7 @@ class Gateway(object):
 
     def fetch(self, path):
         """按需抓取任意已登录页面（诊断用），返回 (status, 文本)。"""
-        if time.time() - self.login_ts > REL_LOGIN:
-            self.login()
+        # 不按时间预登录：先带已有 cookie 请求，掉登录页再重登（省登录次数）
         st, txt = self._raw_get(path)
         # 登录页特征：带 name="psd" 且不含设备表 —— 说明会话被顶掉，重登一次再取
         if 'name="psd"' in txt or 'name=\"psd\"' in txt:
@@ -134,8 +136,7 @@ class Gateway(object):
 
     def post(self, path, form):
         """按需 POST 表单（诊断用），返回 (status, 文本)。"""
-        if time.time() - self.login_ts > REL_LOGIN:
-            self.login()
+        # 不按时间预登录：先带已有 cookie 请求，掉登录页再重登（省登录次数）
         body = urllib.parse.urlencode(form or {}).encode()
         st, txt = self._raw_post(path, body)
         if 'name="psd"' in txt:
@@ -185,8 +186,7 @@ class Gateway(object):
 
     def allinfo(self):
         """返回 (status, 文本)。文本以 { 开头才算登录成功。"""
-        if time.time() - self.login_ts > REL_LOGIN:
-            self.login()
+        # 不按时间预登录：先带已有 cookie 请求，掉登录页再重登（省登录次数）
         try:
             st, txt = self.http.get('http://%s/cgi-bin/luci/admin/allInfo' % self.ip, {'User-Agent': UA})
         except Exception as e:  # noqa: BLE001
