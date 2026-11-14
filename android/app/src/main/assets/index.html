@@ -871,7 +871,7 @@ var API = 'https://5130599.best/see/api';
 function sess(){ try { return localStorage.getItem('seeSess') || ''; } catch(e) { return ''; } }
 function gwCmd(cmd){
   var out = document.getElementById('gwCmdOut'); if (out) out.textContent = '发送中…';
-  apiFetch('/api/gw/cmd', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+  apiFetch(API + '/gw/cmd', { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ cmd: cmd }) })
     .then(function(r){ return r.json(); })
     .then(function(j){
