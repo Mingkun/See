@@ -1,1 +1,1 @@
-{"versionCode": 177, "versionName": "3.66", "size": 2127922, "md5": "ba677b250d4ace3acb582a42203ad0dc", "note": "监控页顶部显示光猫 CPU 占用率（采集器同步上报 cpuUsed）", "apkUrl": "https://5130599.best/see/downloads/see-android.apk"}
+{"versionCode": 178, "versionName": "3.67", "size": 2127910, "md5": "cf95005adf14ac17ddfd9f38c0daaf25", "note": "监控页标题直接显示「网络 xx%」（光猫 CPU 占用率）", "apkUrl": "https://5130599.best/see/downloads/see-android.apk"}

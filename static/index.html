@@ -278,7 +278,7 @@ button, button *, .btn, .btn *, .tab, .tab * { -webkit-user-select:none; user-se
   </header>
   <div id="viewMon">
   <div class="panel" id="topoPanel">
-    <div class="pt"><span>🖥 光猫 CPU 占用率</span><span class="sub" id="topoSum">–</span></div>
+    <div class="pt"><span>网络 <b id="topoSum" style="font-weight:600">–</b></span></div>
     <div class="stline">在线 <b id="cOn">–</b> · ↓ <b class="dn" id="cDn">–</b> · ↑ <b class="up" id="cUp">–</b> · <b id="cDay">–</b></div>
     <div class="topo-wrap"><svg id="topoSvg" class="topo-svg" viewBox="0 0 340 40"></svg></div>
     <div class="hint" id="topoHint"></div>
@@ -1400,7 +1400,7 @@ function loadGwStats(){
 }
 function topoPaint(){
   var svg = document.getElementById('topoSvg'); if (!svg) return;
-  var sum = document.getElementById('topoSum'), hint = document.getElementById('topoHint');
+  var hint = document.getElementById('topoHint');
   var ds = (GW.last || []).slice();
   if (!ds.length){
     svg.innerHTML = ''; svg.setAttribute('viewBox', '0 0 340 40');
