@@ -224,6 +224,13 @@ button, button *, .btn, .btn *, .tab, .tab * { -webkit-user-select:none; user-se
   .legend { padding:6px var(--pad-x) 0; font-size:var(--fs-sm); color:var(--muted); }
   #anLeg3 { text-align:center; line-height:1.6; padding-bottom:10px; }   /* 卡片底部留一点空白 */
   #anLeg3:empty { padding-bottom:0; }
+  /* 最近 10 分钟使用场景：卡片最底部，紧跟图例 */
+  .scn { margin:0 var(--pad-x) 10px; padding-top:8px; border-top:1px dashed var(--line); }
+  .scn-top { display:flex; align-items:baseline; gap:var(--sp-2); flex-wrap:nowrap; }
+  .scn-lab { font-size:var(--fs-sm); color:var(--muted); white-space:nowrap; flex:none; }
+  .scn-val { font-size:var(--fs-md); font-weight:650; white-space:nowrap; }
+  .scn-ev { font-size:var(--fs-sm); color:var(--muted); margin-top:4px; line-height:1.5; }
+  .scn-num { font-variant-numeric:tabular-nums; }
   #lvHint { text-align:center; }
   .chart { display:flex; align-items:flex-end; gap:1px; height:70px; margin:8px 0 2px; }
   .chart .b { flex:1; background:#bfdbfe; border-radius:1px 1px 0 0; position:relative; }
@@ -326,6 +333,7 @@ button, button *, .btn, .btn *, .tab, .tab * { -webkit-user-select:none; user-se
     </div>
     <div class="pbody mt-1"><svg id="anChart" class="chart-svg"></svg></div>
     <div class="sub legend" id="anLeg3"><span class="c-busy">▬</span> 繁忙 · <span class="c-chill">▬</span> 轻量 · <span class="c-idle">▬</span> 空闲 · <span class="c-muted">▬</span> 无数据<br>繁忙:<span id="anDurBusy"></span>，轻量:<span id="anDurChill"></span><br>空闲:<span id="anDurIdle"></span>，无数据:<span id="anDurNone"></span></div>
+    <div class="scn" id="anScene"><div class="scn-ev">最近 10 分钟场景分析：等待采样…</div></div>
   </div>
   <div class="panel">
     <div class="pt"><span>📊 分时用量（分钟）</span><button type="button" class="btn sm" id="anHourMore" onclick="toggleHourFull()" style="display:none">⬇ 展开</button><button type="button" class="btn sm" id="anHourOrder" onclick="toggleHourOrder()">↓ 倒序</button></div>
@@ -1813,6 +1821,7 @@ function anLiveRender(j){
   hint.push('中线以上=上行、以下=下行');
   anLiveMsg(hint.join('；'));
   anLiveBars(j);
+  anSceneRender(j);
 }
 function anLiveBars(j){
   LV.last = j;                       // 供全屏重绘复用
@@ -1872,6 +1881,82 @@ function anLiveBars(j){
   svg.__bars = bars;
   svg.innerHTML = p.join('');
   chartTipSync(svg);
+}
+/* ---- 最近 10 分钟使用场景 ----
+   判据全部来自实测量化（上/下行均值、静默样本占比、峰均比、变异系数）：
+   · 待机   合计 <1.5 K/s，几乎全零
+   · 音乐   只下行、连续不脉冲（静默≈0、峰均比低）
+   · 视频   只下行但分段（静默样本多、峰均比高）
+   · 下载   下行持续高且平稳（CV 小）
+   · 上传   上行为主（相册/云盘备份）
+   · 通话   双向对称且连续（静默<8%、CV 小）；码率大的是视频通话
+   · 聊天   双向对称但忽高忽低（静默多或 CV 大）
+   只统计 present=1 的采样；窗口固定 10 分钟（采集器 10 秒一采 ≈60 个点）。 */
+var SCN_WIN = 600;
+function anSceneCalc(j){
+  var now = j.now || Math.floor(Date.now() / 1000);
+  var t0 = now - SCN_WIN;
+  var ss = (j.samples || []).filter(function(s){ return s[0] >= t0 && s[3]; });
+  if (!ss.length) return null;
+  var n = ss.length, su = 0, sd = 0, mx = 0, q = 0, arr = [];
+  for (var i = 0; i < n; i++){
+    var u = ss[i][1], d = ss[i][2], t = u + d;
+    su += u; sd += d; arr.push(t);
+    if (t > mx) mx = t;
+  }
+  var mu = su / n, md = sd / n, mt = mu + md, cv = 0;
+  if (mt > 0){
+    var v = 0;
+    for (var k = 0; k < n; k++){ var dd = arr[k] - mt; v += dd * dd; }
+    cv = Math.sqrt(v / n) / mt;
+  }
+  for (var z = 0; z < n; z++) if (arr[z] < 2048) q++;
+  return { n: n, mu: mu, md: md, mt: mt, cv: cv, q: q / n, mx: mx,
+           ratio: (md > 1 ? mu / md : (mu > 1 ? 99 : 1)),
+           pr: (mt > 0 ? mx / mt : 0), bytes: mt * 10 * n };
+}
+function anSceneClass(s){
+  if (s.mt < 1536)
+    return { c: 'c-idle', t: '纯待机', d: '基本没有流量：只有通知保活的小包，低于采样粒度，显示 0 是正常的。' };
+  if (s.ratio < 0.25){
+    if (s.q >= 0.22)
+      return { c: 'c-busy', t: '视频播放', d: '分段拉流：集中拉一块再静默，静默样本多、峰均比高。' };
+    if (s.md >= 153600)
+      return { c: 'c-busy', t: '高清视频 / 大文件下载', d: '下行码率很高且一直不回零，像 4K 视频或大文件。' };
+    if (s.md >= 40960)
+      return { c: 'c-busy', t: '视频连续播放', d: '单向持续拉流，码率高于音频档（>320 kbps）。' };
+    return { c: 'c-chill', t: '音乐 / 音频流', d: '单向持续拉流、码率稳定，基本等于音频码率。' };
+  }
+  if (s.ratio > 2.5 && s.mu > 8192)
+    return { c: 'c-warn', t: '上传 / 云备份', d: '上行为主，多半是相册、云盘在同步。' };
+  if (s.ratio > 0.45 && s.ratio < 2.2 && s.mu > 3072 && s.md > 3072){
+    if (s.q < 0.08 && s.cv < 0.6)
+      return (s.mt > 153600)
+        ? { c: 'c-busy', t: '视频通话', d: '双向高码率对称，还可能带着屏幕共享。' }
+        : { c: 'c-chill', t: '语音通话', d: '双向对称且连续，典型实时语音（静默包不会归零）。' };
+    return { c: 'c-chill', t: '图文 / 社交聊天', d: '双向都有但忽高忽低，多是图片、表情包、短视频预览互发。' };
+  }
+  return { c: 'c-muted', t: '混合轻量使用', d: '上下行都不突出，像是刷页面、收消息这类零碎使用。' };
+}
+function anSceneRender(j){
+  var box = document.getElementById('anScene');
+  if (!box) return;
+  var s = anSceneCalc(j);
+  var html;
+  if (!s){
+    html = (j && j.n && !j.present)
+      ? '<div class="scn-ev">最近 10 分钟这台设备不在线（网关没报它）</div>'
+      : '<div class="scn-ev">最近 10 分钟没有采样（采集器可能没在跑）</div>';
+  } else {
+    var cl = anSceneClass(s);
+    html = '<div class="scn-top"><span class="scn-lab">最近 10 分钟</span>' +
+      '<span class="scn-val ' + cl.c + '">' + cl.t + '</span></div>' +
+      '<div class="scn-ev">' + cl.d + '</div>' +
+      '<div class="scn-ev"><span class="scn-num">' + s.n + ' 个采样 · ↑ ' + fmtSpeed(s.mu) +
+      ' · ↓ ' + fmtSpeed(s.md) + ' · 静默 ' + Math.round(s.q * 100) + '% · 合计约 ' +
+      fmtBytes(s.bytes) + '</span></div>';
+  }
+  if (box.__h !== html){ box.__h = html; box.innerHTML = html; }
 }
 function anLoad(){
   var hrs = AN.win || 24;

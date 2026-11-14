@@ -1,1 +1,1 @@
-{"versionCode": 183, "versionName": "3.72", "size": 2128170, "md5": "b4b29e006ba763fe2eb8fb7bab527298", "note": "分时表「平均速率」= 该时段内所有采样的算术平均（采到几次算几次）；「峰值」= 该时段最高单次采样", "apkUrl": "https://5130599.best/see/downloads/see-android.apk"}
+{"versionCode":184,"versionName":"3.73","size":2130242,"md5":"7abaa198fe1a66439e4e5081fcb810d8","note":"分析页「流量负载分析」底部新增：最近 10 分钟使用场景分析（待机/音乐/视频/下载/上传/语音通话/视频通话/图文聊天）","apkUrl":"https://5130599.best/see/downloads/see-android.apk"}
