@@ -89,6 +89,7 @@ class Gateway(object):
         self.http = Http(timeout=8.0)
         self.login_ts = 0.0
         self.logins = 0
+        self.was_enabled = None
 
     def login(self):
         form = urllib.parse.urlencode({'username': self.user, 'psd': self.pw}).encode()
@@ -112,6 +113,55 @@ class Gateway(object):
         has_json = txt.lstrip().startswith('{')
         log('网关重连：login=%s allInfo=%s (HTTP %s, %d字节)' % (ok, has_json, st, len(txt)))
         return ok and has_json
+
+    def forget(self):
+        """释放网关会话：清 Cookie（采集暂停时把光猫让给浏览器登录）。"""
+        self.http.jar.clear()
+        self.login_ts = 0.0
+        log('采集中断：已清除网关 Cookie，浏览器可登录光猫')
+
+    def probe_login(self):
+        """模拟浏览器登录（全新 Cookie 罐）：登录 → 设备页 → devInfo，用完即丢弃。
+        用于「暂停采集」时验证网页能否登录光猫，不影响本进程的会话。"""
+        h = Http(timeout=10.0)
+        out = {'ip': self.ip, 'user': self.user}
+        form = urllib.parse.urlencode({'username': self.user, 'psd': self.pw}).encode()
+        t0 = time.time()
+        try:
+            st, txt = h.post('http://%s/cgi-bin/luci' % self.ip, form,
+                             {'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': UA})
+        except Exception as e:  # noqa: BLE001
+            out['error'] = '登录请求异常：%s' % e
+            return out
+        out['login_status'] = st
+        out['login_ms'] = int((time.time() - t0) * 1000)
+        out['login_form_left'] = bool('name="psd"' in txt)
+        out['cookies'] = len(list(h.jar))
+        try:
+            st2, txt2 = h.get('http://%s/cgi-bin/luci/admin/device/pc' % self.ip, {'User-Agent': UA})
+            out['page_status'] = st2
+            out['page_len'] = len(txt2)
+            out['page_ok'] = bool(st2 == 200 and 'name="psd"' not in txt2)
+        except Exception as e:  # noqa: BLE001
+            out['page_error'] = str(e)
+        try:
+            body = urllib.parse.urlencode({'type': '0'}).encode()
+            st3, txt3 = h.post('http://%s/cgi-bin/luci/admin/device/devInfo' % self.ip, body,
+                               {'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': UA})
+            out['devinfo_status'] = st3
+            if txt3.lstrip().startswith('{'):
+                d = json.loads(txt3)
+                n = int(d.get('count') or 0)
+                nz = 0
+                for k in range(1, n + 1):
+                    e = d.get('dev%d' % k) or {}
+                    if float(e.get('upSpeed') or 0) > 0 or float(e.get('downSpeed') or 0) > 0:
+                        nz += 1
+                out['devices'] = n
+                out['nonzero'] = nz
+        except Exception as e:  # noqa: BLE001
+            out['devinfo_error'] = str(e)
+        return out
 
     def raw_allinfo(self):
         """返回 allInfo 原始文本（诊断用）。"""
@@ -624,6 +674,23 @@ class Collector(object):
             self.cmd_gw_get(payload)
         elif cmd == 'gw_post':
             self.cmd_gw_post(payload)
+        elif cmd == 'gw_login':
+            self.cmd_gw_login(payload)
+
+    def cmd_gw_login(self, payload):
+        """模拟网页/浏览器登录光猫，回报结果（暂停采集时验证通道用）。"""
+        try:
+            rep = self.gateway().probe_login()
+        except Exception as e:  # noqa: BLE001
+            rep = {'error': '探测异常：%s' % e}
+        rep['when'] = int(time.time())
+        log('登录探测：%s' % json.dumps(rep, ensure_ascii=False))
+        try:
+            self.http.post(self.api + '/api/gw/diag',
+                           json.dumps({'probe': rep, 'name': 'login'}).encode(),
+                           {'Content-Type': 'application/json', 'X-See-Key': self.key})
+        except Exception as e:  # noqa: BLE001
+            log('登录探测上报异常：%s' % e)
 
     def cmd_gw_get(self, payload):
         """按服务器下发的路径列表抓页面（原始前 6KB），一次性回报。"""
@@ -683,11 +750,25 @@ class Collector(object):
                 elif time.time() - self.on_ts > cfg_every:
                     self.poll_on()
                 if self.enabled:
+                    if self.was_enabled is False:
+                        log('采集恢复：将重新登录网关（会话可能已被浏览器顶掉）')
+                    self.was_enabled = True
                     self.sample_once()
                 else:
+                    if self.was_enabled is not False:
+                        self.was_enabled = False
+                        try:
+                            if self.gw is not None:
+                                self.gw.forget()   # 让出光猫：浏览器可登录
+                        except Exception:  # noqa: BLE001
+                            pass
                     if time.time() - self.off_log > 300:
                         self.off_log = time.time()
                         log('采集开关关闭（等待开启，每 %ds 对一次开关）' % cfg_every)
+                    # 暂停期间仍轮询指令通道（只请求服务器，不碰光猫），便于远程验证
+                    if time.time() - self.cmd_ts > 30:
+                        self.cmd_ts = time.time()
+                        self.poll_cmd()
                     time.sleep(5)
                     continue
                 # 采样/上传间隔可由服务器配置下发（sampleEvery/uploadEvery，0=沿用启动参数）

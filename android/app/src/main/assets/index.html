@@ -382,8 +382,13 @@ button, button *, .btn, .btn *, .tab, .tab * { -webkit-user-select:none; user-se
       <button type="button" id="colPause30" onclick="colPause(30)" class="btn">⏸ 暂停 30 分钟</button>
       <button type="button" id="colToggle" onclick="colToggle()" class="btn">⏸ 暂停</button>
     </div>
-    <div class="sub ml-0 mt-1">暂停后家里的微服采集器会停止登录网关、停止上报（约 20 秒生效）；
-      这期间在这台设备上登录光猫，就不会被采集器顶下线了。忘记恢复也没事：「暂停 30 分钟」会自己恢复。</div>
+    <div class="sub ml-0 mt-1">暂停后家里的微服采集器会停止登录网关、停止上报、并释放光猫会话（约 20 秒生效）；
+      这期间登录光猫不会被顶下线。忘记恢复也没事：「暂停 30 分钟」会自己恢复。</div>
+    <div class="row mt-1">
+      <button type="button" id="colLoginBtn" onclick="colLoginTest()" class="btn">🔑 测试登录光猫</button>
+      <a class="btn" href="http://192.168.1.1/" target="_blank" rel="noopener">↗ 打开光猫</a>
+    </div>
+    <div class="sub ml-0 mt-1" id="colLoginOut"></div>
     <div class="collect">
     <div class="sec">云端采集（微服）</div>
     <div class="sub ml-0 mt-1">手机端不再采集：网关数据由家里的微服采集器上报，app 只负责查看。这里配的是采集器登录网关的账号，以及它的总开关。</div>
@@ -1194,6 +1199,42 @@ function colSet(on, offMin){
 }
 function colPause(m){ colSet(false, m || 0); }
 function colToggle(){ colSet(!COL.on, COL.on ? 0 : 0); }
+/* 「测试登录光猫」：让采集器用全新 Cookie 罐模拟一次浏览器登录（暂停时用）。
+   采集器收到指令后回报结果到 data/gw-diag-login.json，这里轮询读回。 */
+var CLT = { timer: null, n: 0, start: 0 };
+function colLoginOut(t){ var o = document.getElementById('colLoginOut'); if (o) o.textContent = t; }
+function colLoginTest(){
+  var t0 = Math.floor(Date.now() / 1000);
+  colLoginOut('已发送测试指令，等采集器执行（暂停中约 20–30 秒）…');
+  apiFetch(API + '/gw/cmd', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cmd: 'gw_login' })
+  }).then(function(r){ return r.json(); }).then(function(j){
+    if (!j || !j.ok){ colLoginOut('⚠ 指令下发失败：' + ((j && j.error) || '未登录？')); return; }
+    CLT.start = t0; CLT.n = 0;
+    if (CLT.timer) clearInterval(CLT.timer);
+    CLT.timer = setInterval(function(){
+      CLT.n++;
+      apiFetch(API + '/gw/diag?name=login', {}).then(function(r){ return r.json(); }).then(function(d){
+        var pr = d && d.data && d.data.probe;
+        if (pr && (pr.when || 0) >= CLT.start - 2){ clearInterval(CLT.timer); CLT.timer = null; colLoginShow(pr); return; }
+        if (CLT.n >= 14){ clearInterval(CLT.timer); CLT.timer = null; colLoginOut('⚠ 45 秒内没收到结果：确认懒猫上的采集器已更新到新版并重启。'); }
+      }).catch(function(){});
+    }, 3000);
+  }).catch(function(){ colLoginOut('⚠ 指令下发失败（网络错误）。'); });
+}
+function colLoginShow(pr){
+  if (!pr || pr.error){ colLoginOut('✗ 登录失败：' + ((pr && pr.error) || '无返回')); return; }
+  var okLogin = (pr.login_status === 200) && !pr.login_form_left;
+  var parts = [];
+  parts.push(okLogin ? '✓ 登录成功' : '✗ 登录未成功');
+  if (pr.login_ms != null) parts.push(pr.login_ms + ' ms');
+  if (pr.cookies != null) parts.push('cookie ' + pr.cookies);
+  if (pr.page_status != null) parts.push('设备页 HTTP ' + pr.page_status + (pr.page_ok ? '（可正常打开）' : '（异常）'));
+  if (pr.devices != null) parts.push('读到 ' + pr.devices + ' 台设备（' + (pr.nonzero || 0) + ' 台有流量）');
+  if (pr.error) parts.push(pr.error);
+  colLoginOut(parts.join(' · '));
+}
 function gwCollect(){ colToggle(); }
 function gwStop(){ colToggle(); }
 function gwDur(s){

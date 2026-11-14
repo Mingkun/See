@@ -1223,7 +1223,7 @@ def api_gw_cmd():
             _GW_CMD['payload'] = {}
             return jsonify(ok=True)
         # 会话发指令（网页/APP 按钮）；采集器（key）只允许 done 回报
-        if kind in ('sess', 'key') and data.get('cmd') in ('gw_relogin', 'gw_diag', 'gw_get', 'gw_post'):
+        if kind in ('sess', 'key') and data.get('cmd') in ('gw_relogin', 'gw_diag', 'gw_get', 'gw_post', 'gw_login'):
             _GW_CMD['cmd'] = data['cmd']
             _GW_CMD['ts'] = int(time.time())
             _GW_CMD['payload'] = {k: data.get(k) for k in ('path', 'paths', 'posts', 'form', 'name') if data.get(k)}
@@ -1236,12 +1236,23 @@ def api_gw_cmd():
     return jsonify(ok=True, cmd=_GW_CMD['cmd'], payload=_GW_CMD['payload'])
 
 
-@app.route('/api/gw/diag', methods=['OPTIONS', 'POST'])
+@app.route('/api/gw/diag', methods=['OPTIONS', 'GET', 'POST'])
 def api_gw_diag():
-    """采集器上报网关 allInfo 原始响应（诊断用），存 data/gw-diag.json。仅机器密钥。"""
+    """采集器上报网关诊断结果（POST，仅机器密钥）；网页/App 可 GET 读回（登录探测等）。"""
     if request.method == 'OPTIONS':
-        return _opt('POST, OPTIONS')
-    if _auth_kind() != 'key':
+        return _opt('GET, POST, OPTIONS')
+    kind = _auth_kind()
+    if request.method == 'GET':
+        if kind is None:
+            return _deny()
+        name = re.sub(r'[^A-Za-z0-9_-]', '', str(request.args.get('name') or ''))[:32]
+        fn = 'gw-diag-%s.json' % name if name else 'gw-diag.json'
+        try:
+            with open(os.path.join(ROOT, 'data', fn), 'r', encoding='utf-8') as f:
+                return jsonify(ok=True, file=fn, data=json.load(f))
+        except (OSError, ValueError):
+            return jsonify(ok=False, error='还没有诊断数据'), 404
+    if kind != 'key':
         return _deny()
     data = request.get_json(silent=True) or {}
     if data.get('pages'):
