@@ -278,7 +278,7 @@ button, button *, .btn, .btn *, .tab, .tab * { -webkit-user-select:none; user-se
   </header>
   <div id="viewMon">
   <div class="panel" id="topoPanel">
-    <div class="pt"><span>📡 网络拓扑</span><span class="sub" id="topoSum">–</span></div>
+    <div class="pt"><span>🖥 光猫 CPU 占用率</span><span class="sub" id="topoSum">–</span></div>
     <div class="stline">在线 <b id="cOn">–</b> · ↓ <b class="dn" id="cDn">–</b> · ↑ <b class="up" id="cUp">–</b> · <b id="cDay">–</b></div>
     <div class="topo-wrap"><svg id="topoSvg" class="topo-svg" viewBox="0 0 340 40"></svg></div>
     <div class="hint" id="topoHint"></div>
@@ -716,8 +716,9 @@ function loadDetail(){
   }).catch(function(){});
 }
 document.getElementById('detail').addEventListener('click',function(e){ if(e.target===this) closeDetail(); });
-loadStatus(); loadDevices(); loadEvents();
+loadStatus(); loadDevices(); loadEvents(); loadGwStats();
 setInterval(loadStatus,2000); setInterval(loadDevices,2000); setInterval(loadEvents,5000);
+setInterval(loadGwStats,15000);
 setInterval(function(){ if(curIp) loadDetail(); },3000);
 var SEE_VERCODE = 0;
 function openSys(){ document.getElementById('sysPanel').style.display='flex'; loadSys(); colLoad(); }
@@ -1382,13 +1383,27 @@ function isApNode(d){
       || n.indexOf('be7') >= 0 || n.indexOf('中继') >= 0 || n.indexOf('repeater') >= 0
       || n.indexOf('光猫') >= 0 || n.indexOf('optixstar') >= 0 || n.indexOf('optistar') >= 0;
 }
+var _cpuTs = 0;
+function loadGwStats(){
+  var o = document.getElementById('topoSum'); if (!o) return;
+  var now = Date.now();
+  if (now - _cpuTs < 8000) return;          // 页面每 2 秒刷新，这里 8 秒内不重复请求
+  _cpuTs = now;
+  apiFetch(API + '/gw/stats?secs=60', {}).then(function(r){ return r.json(); }).then(function(j){
+    if (!j || !j.ok || !j.latest || j.age > 180){ o.textContent = '–'; o.style.color = ''; return; }
+    var c = Number(j.latest.cpu);
+    if (!isFinite(c) || c < 0){ o.textContent = '–'; o.style.color = ''; return; }
+    c = Math.round(c);
+    o.textContent = c + '%';
+    o.style.color = c >= 85 ? '#dc2626' : (c >= 60 ? '#d97706' : '#0e7490');
+  }).catch(function(){});
+}
 function topoPaint(){
   var svg = document.getElementById('topoSvg'); if (!svg) return;
   var sum = document.getElementById('topoSum'), hint = document.getElementById('topoHint');
   var ds = (GW.last || []).slice();
   if (!ds.length){
     svg.innerHTML = ''; svg.setAttribute('viewBox', '0 0 340 40');
-    if (sum) sum.textContent = '';
     if (hint) hint.textContent = '暂无设备数据 · 等微服采集器上报（30 秒一轮、30 秒上传一次）';
     return;
   }
@@ -1407,8 +1422,6 @@ function topoPaint(){
   if (!aps.length){ wf = wf.concat(wa); wa = []; }   // 找不到 AP 节点就退回两列旧样子
   var ap = aps[0] || null;
   var nrAll = wr.length + aps.length;
-  if (sum) sum.textContent = '🔌 有线 ' + nrAll + ' · 📶 无线 ' + (wf.length + wa.length)
-    + (wa.length ? '（经AP ' + wa.length + '）' : '');
   var NW = 160, GAP = 8, M = 6, ROW = 38, TOP = 78;
   var colX = [M, M + NW + GAP], colC = [M + NW / 2, M + NW + GAP + NW / 2];
   var wrList = wr.concat(aps);               // AP 都放有线列末尾：往下接子层不会穿过别的盒子

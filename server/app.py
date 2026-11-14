@@ -965,6 +965,13 @@ def api_gw_samples():
     data = request.get_json(force=True, silent=True) or {}
     rows = data.get('samples') or []
     n = store.add_gw_samples(rows[:2000])
+    # 采集器顺带上报光猫自身指标（CPU 使用率 %），老采集器不带则跳过
+    if data.get('cpu') is not None:
+        try:
+            store.add_gw_stats(int(data.get('ts') or time.time()),
+                               float(data.get('cpu')), int(data.get('uptime') or 0))
+        except Exception:  # noqa: BLE001
+            pass
     # 顺带清理：只保留最近 24 小时采样（控制数据量；分析窗 anWin=24 与此对齐）
     try:
         if time.time() - _LAST_PRUNE[0] > 3600:
@@ -973,6 +980,26 @@ def api_gw_samples():
     except Exception:  # noqa: BLE001
         pass
     return jsonify(ok=True, n=n)
+
+
+@app.route('/api/gw/stats', methods=['OPTIONS', 'GET'])
+def api_gw_stats():
+    """光猫自身指标（CPU 使用率）。网页/App 走会话，采集器走机器密钥。"""
+    if request.method == 'OPTIONS':
+        return _opt('GET, OPTIONS')
+    if _auth_kind() is None:
+        return _deny()
+    try:
+        secs = int(request.args.get('secs') or 3600)
+    except Exception:  # noqa: BLE001
+        secs = 3600
+    secs = max(60, min(secs, 86400))
+    now = int(time.time())
+    latest = store.gw_stats_latest()
+    return jsonify(ok=True, now=now, secs=secs,
+                   latest=latest,
+                   age=(now - latest['ts']) if latest else -1,
+                   series=store.gw_stats_series(now - secs, now))
 
 
 @app.route('/api/gw/battery', methods=['OPTIONS', 'POST'])

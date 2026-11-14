@@ -34,6 +34,8 @@ class Store:
                 present INTEGER DEFAULT 0, up REAL DEFAULT 0, down REAL DEFAULT 0);
             CREATE INDEX IF NOT EXISTS idx_gws_key_ts ON gw_samples(devkey, ts);
             CREATE INDEX IF NOT EXISTS idx_gws_ts ON gw_samples(ts);
+            CREATE TABLE IF NOT EXISTS gw_stats(
+                ts INTEGER PRIMARY KEY, cpu REAL DEFAULT -1, uptime INTEGER DEFAULT 0);
             ''')
             # link（有线/无线）：老库没有这列，补上（采集器新版才会填；空值=未知）
             cols = [r[1] for r in self._db.execute('PRAGMA table_info(gw_samples)')]
@@ -199,6 +201,27 @@ class Store:
                 "SELECT devkey, link FROM gw_samples WHERE link<>''"
                 ' GROUP BY devkey HAVING ts=MAX(ts)').fetchall()
         return {r['devkey']: r['link'] for r in rows}
+
+    def add_gw_stats(self, ts, cpu, uptime=0):
+        """光猫自身的运行指标（CPU 使用率 %）。ts 为主键，同一秒重复上报直接覆盖。"""
+        with self._lock:
+            self._db.execute('INSERT OR REPLACE INTO gw_stats(ts, cpu, uptime) VALUES(?,?,?)',
+                             (int(ts), float(cpu), int(uptime or 0)))
+            self._db.commit()
+
+    def gw_stats_latest(self):
+        row = self._db.execute('SELECT ts, cpu, uptime FROM gw_stats ORDER BY ts DESC LIMIT 1').fetchone()
+        return dict(row) if row else None
+
+    def gw_stats_series(self, frm, to):
+        rows = self._db.execute('SELECT ts, cpu FROM gw_stats WHERE ts>=? AND ts<=? ORDER BY ts',
+                                (int(frm), int(to))).fetchall()
+        return [[int(r['ts']), float(r['cpu'])] for r in rows]
+
+    def prune_gw_stats(self, before):
+        with self._lock:
+            self._db.execute('DELETE FROM gw_stats WHERE ts<?', (int(before),))
+            self._db.commit()
 
     def gw_last_ts(self):
         """最近一次采样的时间戳（0=库里还没有任何采样），给「采集器还活着吗」用"""

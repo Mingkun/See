@@ -1,1 +1,1 @@
-{"versionCode": 176, "versionName": "3.65", "size": 2127678, "md5": "f57cd3966cb2f931e09126bf31045a21", "note": "采集周期改为 30 秒（实时曲线一档 30 秒）", "apkUrl": "https://5130599.best/see/downloads/see-android.apk"}
+{"versionCode": 177, "versionName": "3.66", "size": 2127922, "md5": "ba677b250d4ace3acb582a42203ad0dc", "note": "监控页顶部显示光猫 CPU 占用率（采集器同步上报 cpuUsed）", "apkUrl": "https://5130599.best/see/downloads/see-android.apk"}

@@ -252,6 +252,18 @@ class Gateway(object):
                 continue
         return out, n, st
 
+    def gwstatus(self):
+        """光猫自身状态：cpuUsed(%) / upTime(秒) / 无线客户端数等。取不到返回 None。"""
+        try:
+            st, txt = self.http.get('http://%s/cgi-bin/luci/admin/settings/gwstatus' % self.ip,
+                                    {'User-Agent': UA})
+            if st != 200 or not txt.lstrip().startswith('{'):
+                return None
+            j = json.loads(txt)
+            return j if isinstance(j, dict) else None
+        except Exception:  # noqa: BLE001
+            return None
+
     def allinfo(self):
         """返回 (status, 文本)。文本以 { 开头才算登录成功。"""
         # 不按时间预登录：先带已有 cookie 请求，掉登录页再重登（省登录次数）
@@ -326,6 +338,8 @@ class Collector(object):
         self.up_log = 0.0         # 上传日志节流（间隔缩小后不然刷屏）
         self.dev_logged = False   # devInfo 失败日志只打一次
         self.was_enabled = None   # 上一轮开关状态（None=首轮）：用于「暂停让出光猫」「恢复重登」
+        self.cpu = None           # 光猫 CPU 使用率（%），随采样一起上报
+        self.up_sec = 0           # 光猫已运行秒数
 
     # ---------- 服务器：配置 ----------
     def refresh_cfg(self):
@@ -393,7 +407,11 @@ class Collector(object):
         if not self.upload or not self.buf:
             return 0
         rows = self.buf[:2000]
-        body = json.dumps({'samples': rows}, ensure_ascii=False).encode()
+        payload = {'samples': rows, 'ts': int(time.time())}
+        if self.cpu is not None:
+            payload['cpu'] = self.cpu
+            payload['uptime'] = self.up_sec
+        body = json.dumps(payload, ensure_ascii=False).encode()
         try:
             st, txt = self.http.post(self.api + '/api/gw/samples', body,
                                      {'Content-Type': 'application/json', 'X-See-Key': self.key})
@@ -429,6 +447,15 @@ class Collector(object):
             speeds, devcnt, dst = gw.devinfo_speeds()
         except Exception as e:  # noqa: BLE001
             log('devInfo 速率读取失败：%s' % e)
+        # 光猫自身指标（CPU%）：独立接口，取不到不影响采样
+        try:
+            gs = gw.gwstatus()
+            if gs:
+                self.cpu = float(gs.get('cpuUsed'))
+                self.up_sec = int(gs.get('upTime') or 0)
+        except Exception:  # noqa: BLE001
+            pass
+
         if speeds:
             hit = 0
             for d in devs:
