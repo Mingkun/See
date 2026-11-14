@@ -35,6 +35,7 @@ UA = 'Mozilla/5.0 (Linux; Android 14)'
 REL_LOGIN = 3600         # 兜底重登阈值（秒）：正常靠 cookie 保持会话，掉登录页才重登
 LOGIN_GAP = 20           # 两次登录的最小间隔（秒）：10 秒轮询下防止「取不到就重登」连环刷，
                          # 网关只允许一个管理员会话，连续 POST /cgi-bin/luci 会自己顶自己
+ALLINFO_EVERY = 3        # 设备表（allInfo）几轮取一次：名字/链路类型几乎不变，没必要每轮都拉
 ABSENT_TTL = 25 * 3600   # 缺席超过这个时间就不再补 present=0（与 app 的 25h 同口径）
 
 
@@ -345,8 +346,11 @@ class Collector(object):
         self.was_enabled = None   # 上一轮开关状态（None=首轮）：用于「暂停让出光猫」「恢复重登」
         self.cpu = None           # 光猫 CPU 使用率（%），随采样一起上报
         self.up_sec = 0           # 光猫已运行秒数
-        self.rnd = 0              # 采样轮次（CPU 隔轮取用）
+        self.rnd = 0              # 采样轮次（CPU/设备表隔轮取用）
         self.cost_log = 0.0       # 「本轮耗时」日志节流
+        self.dev_cache = []       # 缓存的设备表（allInfo 解析结果）
+        self.ai_ts = 0.0          # 设备表缓存时间
+        self.t_last = {}          # 上一轮各步骤耗时（给日志用）
 
     # ---------- 服务器：配置 ----------
     def refresh_cfg(self):
@@ -437,27 +441,44 @@ class Collector(object):
     # ---------- 一轮采样 ----------
     def sample_once(self):
         gw = self.gateway()
-        st, txt = gw.allinfo()
-        if not txt.lstrip().startswith('{'):
-            snip = ' '.join(txt.split())[:80]
-            log('网关未返回数据（HTTP %s）：%s' % (st, snip or '（空）'))
-            return 0
-        try:
-            devs = parse_allinfo(txt)
-        except Exception as e:  # noqa: BLE001
-            log('解析 allInfo 失败：%s' % e)
-            return 0
+        self.rnd = getattr(self, 'rnd', 0) + 1
+        t_ai = t_dv = t_cpu = 0.0
+        # 设备表（名字/链路类型）几十分钟都不变，没必要每轮都拉：
+        # allInfo 一次好几秒，改成 3 轮一次（约 30 秒），中间直接用缓存，
+        # 每轮只留 devInfo（速率，必须实时）这一次往返。
+        need_ai = ((self.rnd % ALLINFO_EVERY == 1) or not self.dev_cache
+                   or (time.time() - self.ai_ts > 180))
+        if need_ai:
+            _t = time.time()
+            st, txt = gw.allinfo()
+            t_ai = time.time() - _t
+            if txt.lstrip().startswith('{'):
+                try:
+                    self.dev_cache = parse_allinfo(txt)
+                    self.ai_ts = time.time()
+                except Exception as e:  # noqa: BLE001
+                    log('解析 allInfo 失败：%s' % e)
+            elif self.dev_cache:
+                log('allInfo 暂不可用（HTTP %s），沿用 %d 秒前的设备表'
+                    % (st, int(time.time() - self.ai_ts)))
+            else:
+                snip = ' '.join(txt.split())[:80]
+                log('网关未返回数据（HTTP %s）：%s' % (st, snip or '（空）'))
+                return 0
+        devs = [dict(d) for d in self.dev_cache]   # 拷贝：下面要按 IP 覆盖速率
 
         # 速率：devInfo(type=0) 才是真数据源（allInfo 的 up/down 恒为 0）
         speeds, devcnt, dst = {}, 0, -1
+        _t = time.time()
         try:
             speeds, devcnt, dst = gw.devinfo_speeds()
         except Exception as e:  # noqa: BLE001
             log('devInfo 速率读取失败：%s' % e)
+        t_dv = time.time() - _t
         # 光猫自身指标（CPU%）：独立接口，取不到不影响采样。
         # 10 秒轮询下不必每轮都取：CPU 3 轮一更（约 30 秒），少一次往返好让整轮挤进采样周期。
-        self.rnd = getattr(self, 'rnd', 0) + 1
         if self.rnd % 3 == 1 or self.cpu is None:
+            _t = time.time()
             try:
                 gs = gw.gwstatus()
                 if gs:
@@ -465,6 +486,8 @@ class Collector(object):
                     self.up_sec = int(gs.get('upTime') or 0)
             except Exception:  # noqa: BLE001
                 pass
+            t_cpu = time.time() - _t
+        self.t_last = {'ai': t_ai, 'dv': t_dv, 'cpu': t_cpu, 'devs': len(devs)}
 
         if speeds:
             hit = 0
@@ -861,8 +884,10 @@ class Collector(object):
             _cost = time.time() - t0
             if time.time() - self.cost_log >= 60:
                 self.cost_log = time.time()
-                log('本轮耗时 %.1fs（周期 %ds，登录累计 %d 次）'
-                    % (_cost, _iv, getattr(self.gw, 'logins', 0) if self.gw else 0))
+                tl = self.t_last or {}
+                log('本轮耗时 %.1fs / 周期 %ds（设备表 %.1f · 速率 %.1f · CPU %.1f · %d 台 · 登录累计 %d 次）'
+                    % (_cost, _iv, tl.get('ai') or 0, tl.get('dv') or 0, tl.get('cpu') or 0,
+                       tl.get('devs') or 0, getattr(self.gw, 'logins', 0) if self.gw else 0))
             time.sleep(max(0.5, _iv - _cost))
 
 
