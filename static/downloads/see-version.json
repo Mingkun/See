@@ -1,1 +1,1 @@
-{"versionCode":186,"versionName":"3.75","size":2134370,"md5":"7f38d1f34ca88383c7c93279fd89c44b","note":"分析页新增「使用时间线」卡片：多选设备 × 近6/12/24小时，每10分钟一个点（有人使用=彩点、无人=灰点），点小点看判定依据","apkUrl":"https://5130599.best/see/downloads/see-android.apk"}
+{"versionCode":187,"versionName":"3.76","size":2135410,"md5":"26e6b0b5e721c378eaf9f565333f4174","note":"使用时间线支持双击全屏：全屏下行距更大、按下即选点、拖动连续选点，判定详情画在图内底部；双击/Esc/返回键退出","apkUrl":"https://5130599.best/see/downloads/see-android.apk"}

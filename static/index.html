@@ -2079,8 +2079,10 @@ function ugInit(){
 function ugBind(){
   var svg = document.getElementById('ugChart'); if (!svg || svg.__ugBound) return;
   svg.__ugBound = true;
-  svg.addEventListener('click', function(ev){
-    if (!UG.grid || !UG.geom) return;
+  var lastTap = 0, tapTimer = null, fsLastTap = 0;
+  var dragging = false, hadDrag = false, downX = 0, downY = 0;
+  function cellAt(ev){
+    if (!UG.grid || !UG.geom) return null;
     var r = svg.getBoundingClientRect();
     var vb = (svg.getAttribute('viewBox') || '').split(/\s+/);
     var vw = parseFloat(vb[2]) || r.width, vh = parseFloat(vb[3]) || r.height;
@@ -2088,9 +2090,46 @@ function ugBind(){
     var y = (ev.clientY - r.top) / (r.height || 1) * vh;
     var g = UG.geom;
     var c = Math.floor((x - g.padL) / g.bw), ri = Math.floor((y - g.padT) / g.rh);
-    if (c < 0 || c >= g.nb || ri < 0 || ri >= UG.grid.length) return;
-    ugShow(ri, c);
+    if (c < 0 || c >= g.nb || ri < 0 || ri >= UG.grid.length) return null;
+    return [ri, c];
+  }
+  // 非全屏：单击选点、双击进全屏（与 anChart 同节奏：单击延后 300ms 等双击来取消）
+  svg.addEventListener('click', function(ev){
+    if (CHART_FS === 'ugChart') return;          // 全屏里选点/退出全走 pointer 事件
+    var now = Date.now();
+    if (tapTimer){ clearTimeout(tapTimer); tapTimer = null; }
+    if (now - lastTap < 300){ lastTap = 0; chartToggleFs('ugChart'); return; }
+    lastTap = now;
+    var cell = cellAt(ev);
+    tapTimer = setTimeout(function(){ tapTimer = null; if (cell) ugShow(cell[0], cell[1]); }, 300);
   });
+  // 全屏：按下即选点，拖动连续选点，双击退出（Esc/返回键由全局 seeExitChartFs 接管）
+  svg.addEventListener('pointerdown', function(ev){
+    if (CHART_FS !== 'ugChart') return;
+    dragging = true; hadDrag = false;
+    downX = ev.clientX; downY = ev.clientY;
+    try { svg.setPointerCapture(ev.pointerId); } catch (e) {}
+    var cell = cellAt(ev);
+    if (cell) ugShow(cell[0], cell[1]);
+    ev.preventDefault();
+  });
+  svg.addEventListener('pointermove', function(ev){
+    if (!dragging || CHART_FS !== 'ugChart') return;
+    if (!hadDrag && (Math.abs(ev.clientX - downX) > 3 || Math.abs(ev.clientY - downY) > 3)) hadDrag = true;
+    if (hadDrag){ var cell = cellAt(ev); if (cell) ugShow(cell[0], cell[1]); }
+    ev.preventDefault();
+  });
+  function endDrag(ev, isTap){
+    if (!dragging) return;
+    dragging = false;
+    try { svg.releasePointerCapture(ev.pointerId); } catch (e) {}
+    if (!isTap || hadDrag) return;
+    var now = Date.now();
+    if (now - fsLastTap < 320){ fsLastTap = 0; seeExitChartFs(); }   // 双击 → 退出全屏
+    else fsLastTap = now;
+  }
+  svg.addEventListener('pointerup', function(ev){ endDrag(ev, true); });
+  svg.addEventListener('pointercancel', function(ev){ endDrag(ev, false); });
 }
 function ugShow(ri, c){
   var row = UG.grid[ri]; if (!row || !row[c]) return;
@@ -2106,10 +2145,15 @@ function ugShow(ri, c){
   var d = (UG.last && UG.last.devs && UG.last.devs[ri]) || {};
   var nm = String(d.name || d.ip || d.key || '');
   var cell = row[c], b = cell.b, v = cell.v;
+  var line1 = anHMin(cell.t0) + '–' + anHMin(cell.t0 + 600) + ' · ' + cutName(nm, 14) + ' → ' + v.t;
   var line2 = !b ? '该 10 分钟没有采样（设备离线或采集器未上报）'
     : b[0] + ' 个采样 · ↑中位 ' + fmtSpeed(b[1]) + ' · ↓中位 ' + fmtSpeed(b[2]) + ' · 静默 ' + Math.round(b[4] * 100) + '% · 上行小包 ' + b[6] + ' · 合计约 ' + fmtBytes(b[7]);
   var dd = document.getElementById('ugDetail');
   if (dd) dd.innerHTML = anHMin(cell.t0) + '–' + anHMin(cell.t0 + 600) + ' · ' + esc(cutName(nm, 14)) + ' → <b>' + v.t + '</b><br>' + line2;
+  // 全屏时 #ugDetail 在图外看不见：详情同步画进 SVG 底部两行
+  var t1 = document.getElementById('ugFsD1'), t2 = document.getElementById('ugFsD2');
+  if (t1) t1.textContent = line1;
+  if (t2) t2.textContent = line2;
 }
 function ugLoad(){
   var svg = document.getElementById('ugChart');
@@ -2128,30 +2172,43 @@ function ugRender(j){
   var svg = document.getElementById('ugChart'); if (!svg) return;
   var devs = j.devs || [];
   var nb = j.nb || 1, frm = j.frm || ((j.now || Math.floor(Date.now() / 1000)) - nb * 600);
+  var fs = (CHART_FS === 'ugChart');
+  if (fs) svg.style.height = '';   // 先清 inline 高度，否则它会盖住 .chart-fs 的 100vh，量不到全屏尺寸
   var W = svg.clientWidth || 340;
-  var padL = 78, padR = 4, padT = 6, padB = 14, rh = 18;
   var rows = Math.max(1, devs.length);
-  var H = padT + rows * rh + padB;
+  var padL = fs ? 96 : 78, padR = 4, padT = fs ? 8 : 6;
+  var rh, padB, H;
+  if (fs){
+    H = svg.clientHeight || window.innerHeight || 640;
+    padB = 70;                                                        // 底部留判定详情两行
+    rh = Math.max(22, Math.min(72, Math.floor((H - padT - padB - 8) / rows)));
+  } else {
+    rh = 18; padB = 14;
+    H = padT + rows * rh + padB;
+  }
   svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
-  svg.style.height = H + 'px';
+  if (!fs) svg.style.height = H + 'px';
   var iw = W - padL - padR, bw = iw / nb;
+  var dotH = fs ? Math.min(rh - 8, 22) : 9;
   var p = [];
   var hrs = j.hours || 24, stepH = hrs <= 6 ? 1 : (hrs <= 12 ? 2 : 4);
   var gridB = padT + rows * rh;
+  var axisY = fs ? (H - padB + 16) : (H - 4);
   // 小时刻度画在整点边界上（frm 只对齐 10 分钟，不对齐小时）
   var tk = Math.ceil(frm / 3600) * 3600;
   for (var t = tk; t <= frm + nb * 600; t += stepH * 3600){
     var x = padL + (t - frm) / 600 * bw;
     p.push('<line x1="' + x.toFixed(1) + '" y1="' + padT + '" x2="' + x.toFixed(1) + '" y2="' + gridB + '" stroke="#f1f4f9"/>');
-    p.push('<text x="' + x.toFixed(1) + '" y="' + (H - 4) + '" font-size="8" fill="#9aa4b2" text-anchor="middle">' + anHMin(t) + '</text>');
+    p.push('<text x="' + x.toFixed(1) + '" y="' + axisY + '" font-size="' + (fs ? 9 : 8) + '" fill="#9aa4b2" text-anchor="middle">' + anHMin(t) + '</text>');
   }
   var grid = [];
+  var chip = fs ? 9 : 6, lf = fs ? 11 : 9;
   for (var r = 0; r < devs.length; r++){
     var d = devs[r], col = UG_COLORS[r % UG_COLORS.length];
-    var nm = cutName(String(d.name || d.ip || d.key || ''), 9);
+    var nm = cutName(String(d.name || d.ip || d.key || ''), fs ? 12 : 9);
     var yc = padT + r * rh + rh / 2;
-    p.push('<rect x="2" y="' + (yc - 3).toFixed(1) + '" width="6" height="6" rx="1" fill="' + col + '"/>');
-    p.push('<text x="11" y="' + (yc + 3).toFixed(1) + '" font-size="9" fill="#1f2630">' + esc(nm) + '</text>');
+    p.push('<rect x="2" y="' + (yc - chip / 2).toFixed(1) + '" width="' + chip + '" height="' + chip + '" rx="1.5" fill="' + col + '"/>');
+    p.push('<text x="' + (chip + 6) + '" y="' + (yc + lf / 2 - 1).toFixed(1) + '" font-size="' + lf + '" fill="#1f2630">' + esc(nm) + '</text>');
     var row2 = [];
     for (var c = 0; c < nb; c++){
       var b = (d.bk || [])[c];
@@ -2159,9 +2216,14 @@ function ugRender(j){
       row2.push({ b: b, v: v, t0: frm + c * 600 });
       var x0 = padL + c * bw, w2 = Math.max(bw - 0.4, 0.8);
       var fill = !b ? '#eef2f7' : (v.used ? col : '#c3ccd8');
-      p.push('<rect x="' + x0.toFixed(2) + '" y="' + (yc - 4.5).toFixed(1) + '" width="' + w2.toFixed(2) + '" height="9" rx="1" fill="' + fill + '"/>');
+      p.push('<rect x="' + x0.toFixed(2) + '" y="' + (yc - dotH / 2).toFixed(1) + '" width="' + w2.toFixed(2) + '" height="' + dotH + '" rx="1.5" fill="' + fill + '"/>');
     }
     grid.push(row2);
+  }
+  if (fs){
+    p.push('<line x1="' + padL + '" y1="' + (H - padB + 4) + '" x2="' + (W - padR) + '" y2="' + (H - padB + 4) + '" stroke="#e3e8ef"/>');
+    p.push('<text id="ugFsD1" x="' + padL + '" y="' + (H - 42) + '" font-size="12" font-weight="650" fill="#1f2630">点任意小点查看该 10 分钟的判定依据</text>');
+    p.push('<text id="ugFsD2" x="' + padL + '" y="' + (H - 22) + '" font-size="10" fill="#69737f">双击任意位置退出全屏 · Esc 同样有效</text>');
   }
   p.push('<rect id="ugSelMark" x="0" y="0" width="0" height="0" fill="none" stroke="#f59e0b" stroke-width="1" pointer-events="none" style="display:none"/>');
   svg.innerHTML = p.join('');
@@ -2349,7 +2411,8 @@ function anRender(j){
 var CHART_FS = '', chartTapTimer = null, chartLastTap = 0;
 var CHART_REDRAW = {
   anChart: function(){ if (AN.last) anRender(AN.last); },
-  lvChart: function(){ if (LV.last) anLiveBars(LV.last); }
+  lvChart: function(){ if (LV.last) anLiveBars(LV.last); },
+  ugChart: function(){ if (UG.last) ugRender(UG.last); }
 };
 function chartMarkRect(b, padT, ih){
   return '<rect id="chartSelMark" x="' + (b.x0 - 0.5).toFixed(2) + '" y="' + padT + '" width="' + Math.max(b.x1 - b.x0 + 1, 1).toFixed(2) + '" height="' + ih + '" fill="#f59e0b" fill-opacity="0.22" stroke="#f59e0b" stroke-width="0.8" pointer-events="none"/>';
