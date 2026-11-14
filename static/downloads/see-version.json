@@ -1,1 +1,1 @@
-{"versionCode": 172, "versionName": "3.61", "size": 2126830, "md5": "28fa7275eb4ed2ef11f7475303143fb0", "note": "修复网关重连/诊断按钮报错：apiFetch用了相对路径导致请求打到错误地址，改为API+绝对路径", "apkUrl": "https://5130599.best/see/downloads/see-android.apk"}
+{"versionCode": 173, "versionName": "3.62", "size": 2126818, "md5": "548c847f39357c175a042b3cc9190acb", "note": "分析页「分时用量」展开按钮去掉行数（⬇ 展开 N 行 → ⬇ 展开）；同步 5 分钟采样相关的页面阈值与文案", "apkUrl": "https://5130599.best/see/downloads/see-android.apk"}
