@@ -20,6 +20,7 @@ see 采集器 —— 把「手机里的采集逻辑」搬到内网常驻设备�
 
 import argparse
 import http.cookiejar
+import io
 import json
 import os
 import re
@@ -89,7 +90,6 @@ class Gateway(object):
         self.http = Http(timeout=8.0)
         self.login_ts = 0.0
         self.logins = 0
-        self.was_enabled = None
 
     def login(self):
         form = urllib.parse.urlencode({'username': self.user, 'psd': self.pw}).encode()
@@ -325,6 +325,7 @@ class Collector(object):
         self.off_log = 0.0        # 暂停期间日志节流
         self.up_log = 0.0         # 上传日志节流（间隔缩小后不然刷屏）
         self.dev_logged = False   # devInfo 失败日志只打一次
+        self.was_enabled = None   # 上一轮开关状态（None=首轮）：用于「暂停让出光猫」「恢复重登」
 
     # ---------- 服务器：配置 ----------
     def refresh_cfg(self):
@@ -760,8 +761,13 @@ class Collector(object):
             log('POST 探测上报异常：%s' % e)
 
     def run(self, interval=10, upload_every=10, cfg_every=20):
-        log('see 采集器启动：api=%s 采样 %ds / 上传 %ds / 开关 %ds'
-            % (self.api, interval, upload_every, cfg_every))
+        try:
+            import hashlib
+            _h = hashlib.md5(io.open(__file__, 'rb').read()).hexdigest()[:8]
+        except Exception:  # noqa: BLE001
+            _h = '?'
+        log('see 采集器启动：api=%s 采样 %ds / 上传 %ds / 开关 %ds / 代码 %s'
+            % (self.api, interval, upload_every, cfg_every, _h))
         last_up = 0.0
         while True:
             try:
