@@ -1,1 +1,1 @@
-{"versionCode": 175, "versionName": "3.64", "size": 2127682, "md5": "e01b33e3bdc18bd15283d2992c30aea6", "note": "暂停采集时新增「测试登录光猫」：采集器释放光猫会话，一键验证浏览器能否登录；系统设置页显示结果", "apkUrl": "https://5130599.best/see/downloads/see-android.apk"}
+{"versionCode": 176, "versionName": "3.65", "size": 2127678, "md5": "f57cd3966cb2f931e09126bf31045a21", "note": "采集周期改为 30 秒（实时曲线一档 30 秒）", "apkUrl": "https://5130599.best/see/downloads/see-android.apk"}

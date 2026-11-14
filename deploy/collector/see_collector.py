@@ -770,6 +770,7 @@ class Collector(object):
             % (self.api, interval, upload_every, cfg_every, _h))
         last_up = 0.0
         while True:
+            t0 = time.time()          # 本轮起点：末端的 sleep 只补「剩余时间」，保证周期精确
             try:
                 if time.time() - self.cfg_ts > 300:
                     self.refresh_cfg()
@@ -818,7 +819,8 @@ class Collector(object):
             except Exception as e:  # noqa: BLE001
                 log('循环异常（忽略并继续）：%s' % e)
                 time.sleep(5)
-            time.sleep(int(self.cfg.get('sampleEvery') or 0) or interval)
+            # 按「整轮周期」计时：采集本身要十几秒，直接 sleep(30) 会变成 44 秒一轮
+            time.sleep(max(1, (int(self.cfg.get('sampleEvery') or 0) or interval) - (time.time() - t0)))
 
 
 def main():
