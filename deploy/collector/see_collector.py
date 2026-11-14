@@ -433,7 +433,9 @@ class Collector(object):
             for d in devs:
                 sp = speeds.get(d.get('ip') or '')
                 if sp is not None:
-                    d['up'], d['down'] = sp
+                    # devInfo 的 upSpeed/downSpeed 单位是 bps（光猫页面就是 Kb/s），
+                    # 数据库/前端统一按字节/秒（B/s）存，故除以 8。
+                    d['up'], d['down'] = sp[0] / 8.0, sp[1] / 8.0
                     hit += 1
             if hit:
                 log('速率来自 devInfo：%d/%d 台有值（网关报 %d 台）' % (hit, len(devs), devcnt))
