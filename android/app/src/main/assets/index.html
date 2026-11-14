@@ -1883,26 +1883,35 @@ function anLiveBars(j){
   chartTipSync(svg);
 }
 /* ---- 最近 10 分钟使用场景 ----
-   判据全部来自实测量化（上/下行均值、静默样本占比、峰均比、变异系数）：
+   判据全部来自实测量化（上/下行中位数、静默样本占比、变异系数、上行小包数）：
    · 待机   合计 <1.5 K/s，几乎全零
    · 音乐   只下行、连续不脉冲（静默≈0、峰均比低）
-   · 视频   只下行但分段（静默样本多、峰均比高）
-   · 下载   下行持续高且平稳（CV 小）
+   · 视频   只下行但分段（静默样本多）或码率高于音频档
+   · 下载   下行码率很高且一直不回零
    · 上传   上行为主（相册/云盘备份）
-   · 通话   双向对称且连续（静默<8%、CV 小）；码率大的是视频通话
-   · 聊天   双向对称但忽高忽低（静默多或 CV 大）
+   · 通话   双向对称且连续（静默<8%）；码率大的是视频通话
+   · 聊天   双向对称但忽高忽低（静默多或波动大）
+   码率与上下行比全部用中位数（均值会被单次下载尖峰骗）；
+   「操作判定」用上行小包（0.5–15 K/s 的小请求包）区分人在/自动：
+   无人时 0–1 个、交互时几十个（实测：待机 0、音乐 1、聊天 69–81、间歇操作 9）。
    只统计 present=1 的采样；窗口固定 10 分钟（采集器 10 秒一采 ≈60 个点）。 */
 var SCN_WIN = 600;
+function scnMedian(a){
+  var b = a.slice().sort(function(x, y){ return x - y; });
+  var m = b.length >> 1;
+  return b.length ? (b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2) : 0;
+}
 function anSceneCalc(j){
   var now = j.now || Math.floor(Date.now() / 1000);
   var t0 = now - SCN_WIN;
   var ss = (j.samples || []).filter(function(s){ return s[0] >= t0 && s[3]; });
   if (!ss.length) return null;
-  var n = ss.length, su = 0, sd = 0, mx = 0, q = 0, arr = [];
+  var n = ss.length, su = 0, sd = 0, mx = 0, q = 0, arr = [], ups = [], dns = [], upSmall = 0;
   for (var i = 0; i < n; i++){
     var u = ss[i][1], d = ss[i][2], t = u + d;
-    su += u; sd += d; arr.push(t);
+    su += u; sd += d; arr.push(t); ups.push(u); dns.push(d);
     if (t > mx) mx = t;
+    if (u > 512 && u < 15360) upSmall++;   // 「人的签名」：0.5–15 K/s 的上行小请求包
   }
   var mu = su / n, md = sd / n, mt = mu + md, cv = 0;
   if (mt > 0){
@@ -1911,32 +1920,50 @@ function anSceneCalc(j){
     cv = Math.sqrt(v / n) / mt;
   }
   for (var z = 0; z < n; z++) if (arr[z] < 2048) q++;
-  return { n: n, mu: mu, md: md, mt: mt, cv: cv, q: q / n, mx: mx,
-           ratio: (md > 1 ? mu / md : (mu > 1 ? 99 : 1)),
+  var medU = scnMedian(ups), medD = scnMedian(dns);
+  return { n: n, mu: mu, md: md, mt: mt, medU: medU, medD: medD, cv: cv, q: q / n, mx: mx,
+           upSmall: upSmall,
+           ratio: (medD > 1 ? medU / medD : (medU > 1 ? 99 : 1)),
            pr: (mt > 0 ? mx / mt : 0), bytes: mt * 10 * n };
 }
 function anSceneClass(s){
+  // 码率/比值全部用中位数：均值会被单次下载尖峰拉爆（实测 22:16 一次 3.4MB/s 把聊天基线
+  // 误判成「视频连续播放」）；中位数对孤立尖峰免疫。
   if (s.mt < 1536)
-    return { c: 'c-idle', t: '纯待机', d: '基本没有流量：只有通知保活的小包，低于采样粒度，显示 0 是正常的。' };
+    return { k: 'idle', c: 'c-idle', t: '纯待机', d: '基本没有流量：只有通知保活的小包，低于采样粒度，显示 0 是正常的。' };
   if (s.ratio < 0.25){
     if (s.q >= 0.22)
-      return { c: 'c-busy', t: '视频播放', d: '分段拉流：集中拉一块再静默，静默样本多、峰均比高。' };
-    if (s.md >= 153600)
-      return { c: 'c-busy', t: '高清视频 / 大文件下载', d: '下行码率很高且一直不回零，像 4K 视频或大文件。' };
-    if (s.md >= 40960)
-      return { c: 'c-busy', t: '视频连续播放', d: '单向持续拉流，码率高于音频档（>320 kbps）。' };
-    return { c: 'c-chill', t: '音乐 / 音频流', d: '单向持续拉流、码率稳定，基本等于音频码率。' };
+      return { k: 'video', c: 'c-busy', t: '视频播放', d: '分段拉流：集中拉一块再静默，静默样本多、峰均比高。' };
+    if (s.medD >= 153600)
+      return { k: 'hd', c: 'c-busy', t: '高清视频 / 大文件下载', d: '下行码率很高且一直不回零，像 4K 视频或大文件。' };
+    if (s.medD >= 40960)
+      return { k: 'video2', c: 'c-busy', t: '视频连续播放', d: '单向持续拉流，码率高于音频档（>320 kbps）。' };
+    return { k: 'music', c: 'c-chill', t: '音乐 / 音频流', d: '单向持续拉流、码率稳定，基本等于音频码率。' };
   }
-  if (s.ratio > 2.5 && s.mu > 8192)
-    return { c: 'c-warn', t: '上传 / 云备份', d: '上行为主，多半是相册、云盘在同步。' };
-  if (s.ratio > 0.45 && s.ratio < 2.2 && s.mu > 3072 && s.md > 3072){
-    if (s.q < 0.08 && s.cv < 0.6)
+  if (s.ratio > 2.5 && s.medU > 8192)
+    return { k: 'up', c: 'c-warn', t: '上传 / 云备份', d: '上行为主，多半是相册、云盘在同步。' };
+  if (s.ratio > 0.45 && s.ratio < 2.2 && s.medU > 3072 && s.medD > 3072){
+    if (s.q < 0.08 && s.cv < 0.8)
       return (s.mt > 153600)
-        ? { c: 'c-busy', t: '视频通话', d: '双向高码率对称，还可能带着屏幕共享。' }
-        : { c: 'c-chill', t: '语音通话', d: '双向对称且连续，典型实时语音（静默包不会归零）。' };
-    return { c: 'c-chill', t: '图文 / 社交聊天', d: '双向都有但忽高忽低，多是图片、表情包、短视频预览互发。' };
+        ? { k: 'vcall', c: 'c-busy', t: '视频通话', d: '双向高码率对称，还可能带着屏幕共享。' }
+        : { k: 'call', c: 'c-chill', t: '语音通话', d: '双向对称且连续，典型实时语音（静默包不会归零）。' };
+    return { k: 'chat', c: 'c-chill', t: '图文 / 社交聊天', d: '双向都有但忽高忽低，多是图片、表情包、短视频预览互发。' };
   }
-  return { c: 'c-muted', t: '混合轻量使用', d: '上下行都不突出，像是刷页面、收消息这类零碎使用。' };
+  return { k: 'mix', c: 'c-muted', t: '混合轻量使用', d: '上下行都不突出，像是刷页面、收消息这类零碎使用。' };
+}
+function anSceneVerdict(s, cl){
+  // 操作判定（与场景独立）：上行小包 = 点按/发消息触发的小请求，自动播放没有它。
+  // 通话/聊天场景必然有人，小包不足时也直接判「人在使用」。
+  if (s.mt < 1536) return { c: 'c-idle', t: '无人操作（待机）', d: '整窗无流量。' };
+  if (s.upSmall >= 5)
+    return s.q >= 0.7
+      ? { c: 'c-chill', t: '间歇拿起使用', d: '大部分时间静默，偶尔一次尖峰加几个小包。' }
+      : { c: 'c-busy', t: '人在使用', d: '上行小请求频繁出现，是点按/发消息的签名。' };
+  if (cl.k === 'call' || cl.k === 'vcall')
+    return { c: 'c-busy', t: '人在使用', d: '通话场景必然有人在线。' };
+  if (s.upSmall >= 2)
+    return { c: 'c-chill', t: '前台活跃', d: '只有心跳级小包：亮着屏但没怎么动，或长连接保活。' };
+  return { c: 'c-idle', t: '无交互（自动/后台）', d: '上行干净，内容在自己跑，人可能不在。' };
 }
 function anSceneRender(j){
   var box = document.getElementById('anScene');
@@ -1949,12 +1976,14 @@ function anSceneRender(j){
       : '<div class="scn-ev">最近 10 分钟没有采样（采集器可能没在跑）</div>';
   } else {
     var cl = anSceneClass(s);
+    var vd = anSceneVerdict(s, cl);
     html = '<div class="scn-top"><span class="scn-lab">最近 10 分钟</span>' +
       '<span class="scn-val ' + cl.c + '">' + cl.t + '</span></div>' +
+      '<div class="scn-ev">操作判定：<span class="' + vd.c + '">' + vd.t + '</span><span class="c-muted"> · ' + vd.d + '</span></div>' +
       '<div class="scn-ev">' + cl.d + '</div>' +
-      '<div class="scn-ev"><span class="scn-num">' + s.n + ' 个采样 · ↑ ' + fmtSpeed(s.mu) +
-      ' · ↓ ' + fmtSpeed(s.md) + ' · 静默 ' + Math.round(s.q * 100) + '% · 合计约 ' +
-      fmtBytes(s.bytes) + '</span></div>';
+      '<div class="scn-ev"><span class="scn-num">' + s.n + ' 个采样 · ↑中位 ' + fmtSpeed(s.medU) +
+      ' · ↓中位 ' + fmtSpeed(s.medD) + ' · 静默 ' + Math.round(s.q * 100) + '% · 上行小包 ' + s.upSmall +
+      ' · 合计约 ' + fmtBytes(s.bytes) + '</span></div>';
   }
   if (box.__h !== html){ box.__h = html; box.innerHTML = html; }
 }

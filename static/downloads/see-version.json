@@ -1,1 +1,1 @@
-{"versionCode":184,"versionName":"3.73","size":2130242,"md5":"7abaa198fe1a66439e4e5081fcb810d8","note":"分析页「流量负载分析」底部新增：最近 10 分钟使用场景分析（待机/音乐/视频/下载/上传/语音通话/视频通话/图文聊天）","apkUrl":"https://5130599.best/see/downloads/see-android.apk"}
+{"versionCode":185,"versionName":"3.74","size":2131294,"md5":"18fb12bdd305bbbe2615dff19de5576f","note":"场景分析新增「操作判定」（人在使用/间歇拿起/前台活跃/无交互/无人操作，靠上行小包识别）；码率判断改用中位数，单次下载尖峰不再误判成视频","apkUrl":"https://5130599.best/see/downloads/see-android.apk"}
