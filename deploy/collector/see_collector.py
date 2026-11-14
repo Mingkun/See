@@ -26,6 +26,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -36,6 +37,8 @@ REL_LOGIN = 3600         # 兜底重登阈值（秒）：正常靠 cookie 保持
 LOGIN_GAP = 20           # 两次登录的最小间隔（秒）：10 秒轮询下防止「取不到就重登」连环刷，
                          # 网关只允许一个管理员会话，连续 POST /cgi-bin/luci 会自己顶自己
 ALLINFO_EVERY = 3        # 设备表（allInfo）几轮取一次：名字/链路类型几乎不变，没必要每轮都拉
+OBS_EVERY = 60           # 观察页（MAC/厂商）扫描间隔：ping 全网段+SSDP+mDNS 要十几秒，
+                         # 必须离开采样主循环（10 秒轮询下它会吃满整个周期）
 ABSENT_TTL = 25 * 3600   # 缺席超过这个时间就不再补 present=0（与 app 的 25h 同口径）
 
 
@@ -349,6 +352,9 @@ class Collector(object):
         self.rnd = 0              # 采样轮次（CPU/设备表隔轮取用）
         self.cost_log = 0.0       # 「本轮耗时」日志节流
         self.dev_cache = []       # 缓存的设备表（allInfo 解析结果）
+        self.http_obs = Http(timeout=20.0)   # 观察上报专用连接（扫描在后台线程，避免与采样抢 self.http）
+        self.obs_ts = 0.0         # 上次观察扫描时间
+        self.obs_busy = False     # 后台扫描是否还在跑
         self.ai_ts = 0.0          # 设备表缓存时间
         self.t_last = {}          # 上一轮各步骤耗时（给日志用）
 
@@ -675,8 +681,8 @@ class Collector(object):
                 d['type'] = banners[ip]
         body = json.dumps({'devices': devs}, ensure_ascii=False).encode()
         try:
-            st, txt = self.http.post(self.api + '/api/obs/report', body,
-                                     {'Content-Type': 'application/json', 'X-See-Key': self.key})
+            st, txt = self.http_obs.post(self.api + '/api/obs/report', body,
+                                         {'Content-Type': 'application/json', 'X-See-Key': self.key})
             j = json.loads(txt)
             if not j.get('ok'):
                 log('观察上报被拒：%s' % j.get('error'))
@@ -686,6 +692,24 @@ class Collector(object):
             return 0
         log('观察上报：%d 台（MAC/厂商）' % len(devs))
         return len(devs)
+
+    def obs_dispatch(self, every=OBS_EVERY):
+        """观察页扫描放后台线程：ping 全网段+SSDP+mDNS 要十几秒，绝不能卡住 10 秒采样。"""
+        now = time.time()
+        if self.obs_busy or now - self.obs_ts < max(10, int(every or 0)):
+            return
+        self.obs_ts = now
+        self.obs_busy = True
+
+        def _work():
+            try:
+                self.report_obs()
+            except Exception as e:  # noqa: BLE001
+                log('观察上报异常（忽略）：%s' % e)
+            finally:
+                self.obs_busy = False
+
+        threading.Thread(target=_work, daemon=True).start()
 
     def selfcheck(self):
         ok = True
@@ -871,7 +895,9 @@ class Collector(object):
                     if n and (n > 1 or time.time() - self.up_log >= 60):
                         self.up_log = time.time()
                         log('已上传 %d 条（buffer 余 %d）' % (n, len(self.buf)))
-                    self.report_obs()   # 顺带上报局域网发现（观察页数据源）
+                    # 观察页扫描（MAC/厂商）走后台线程，60 秒一次；以前是同步跑，
+                    # 一轮要十几秒，10 秒采样下会把周期直接撑到 13 秒以上。
+                    self.obs_dispatch(int(self.cfg.get('obsEvery') or 0) or OBS_EVERY)
             except KeyboardInterrupt:
                 log('收到中断，退出')
                 self.flush()
