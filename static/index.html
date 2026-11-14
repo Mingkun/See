@@ -658,7 +658,7 @@ function loadDevices(){
     return enrich.then(function(){
     var b=document.getElementById('devBody');
     if(!d.devices.length){
-      var hintText = '暂未发现设备 · 采集器模式下等微服上报（约 5 分钟一轮）；本机模式需在 App 内点「立即扫描」';
+      var hintText = '暂未发现设备 · 采集器模式下等微服上报（约 1 分钟一轮）；本机模式需在 App 内点「立即扫描」';
       if(d.last_sample_ts > 0 && d.last_sample_age > 900){
         var hz = Math.floor(d.last_sample_age/3600), mz = Math.floor((d.last_sample_age%3600)/60);
         hintText = '⚠️ 采集器已掉线 ' + (hz>0 ? hz+' 小时 ' : '') + mz + ' 分钟（最后数据 ' + fmtTs(d.last_sample_ts) + '）· 请检查家里微服的 see-collector 服务';
@@ -1706,8 +1706,8 @@ function anKeys(){
 /* ---- 分析页「实时」卡片 ----
    数据来自 /api/gw/live：采集器逐档（默认 10 秒）上报的原始采样，下行/上行分开。
    卡片自己每 3 秒轮一次；新鲜度由「采样间隔 + 上传间隔」决定，所以标题栏标了「N 秒前」。 */
-var LV = { timer: null, busy: false, secs: 300 };
-var LV_STEP = 10;                 // 一档 = 10 秒（跟采集器采样间隔对齐）
+var LV = { timer: null, busy: false, secs: 1800 };
+var LV_STEP = 60;                 // 一档 = 60 秒（跟采集器采样间隔对齐）
 function anLiveVisible(){ var v = document.getElementById('viewAn'); return !!v && v.style.display !== 'none'; }
 function anLiveStart(){ if (!LV.timer) LV.timer = setInterval(function(){ if (anLiveVisible()) anLiveLoad(); }, 3000); }
 function anLiveStop(){ if (LV.timer){ clearInterval(LV.timer); LV.timer = null; } }
