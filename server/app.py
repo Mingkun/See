@@ -910,6 +910,16 @@ def api_config():
     for k in ('ip', 'user', 'on', 'anDev', 'anWin'):
         if k in data:
             cfg[k] = bool(data[k]) if k == 'on' else data[k]
+    # 使用时间线：多选设备（devkey 列表）+ 周期持久化，App/网页重开后恢复勾选
+    if isinstance(data.get('ugDevs'), list):
+        cfg['ugDevs'] = [str(x)[:64] for x in data['ugDevs'] if x][:8]
+    if data.get('ugWin'):
+        try:
+            uw = int(data['ugWin'])
+        except Exception:  # noqa: BLE001
+            uw = 0
+        if uw in (6, 12, 24):
+            cfg['ugWin'] = uw
     # 采集节奏（秒）：采样/上传间隔由服务器下发，采集器整配置拉取（≤5分钟）后生效
     for k in ('sampleEvery', 'uploadEvery'):
         if k in data:

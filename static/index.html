@@ -1750,6 +1750,13 @@ function anSaveSel(){
       body: JSON.stringify({ anDev: AN.key, anWin: AN.win }) });
   } catch (e) {}
 }
+// 使用时间线：多选设备 + 周期同样写回后台，重开 App/网页恢复勾选
+function ugSaveSel(){
+  try {
+    apiFetch(CFG_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ugDevs: UG.devs, ugWin: UG.win }) });
+  } catch (e) {}
+}
 function anInit(){
   anWinItems();
   // 先恢复上次选择（服务器端持久化），再拉设备列表
@@ -1759,6 +1766,8 @@ function anInit(){
       var c = (j && j.cfg) || {};
       if (c.anWin){ var w = parseInt(c.anWin, 10); for (var i = 0; i < AN_WINS.length; i++) if (AN_WINS[i][0] === w) AN.win = w; }
       if (c.anDev){ AN.key = String(c.anDev); SEL_IP = String(c.anDev); }
+      if (c.ugWin){ var w2 = parseInt(c.ugWin, 10); for (var i2 = 0; i2 < AN_WINS.length; i2++) if (AN_WINS[i2][0] === w2) UG.win = w2; }
+      if (c.ugDevs && c.ugDevs.length) UG.devs = c.ugDevs.filter(function(x){ return typeof x === 'string' && x; }).slice(0, 8);
     })
     .catch(function(){})
     .then(function(){ anWinLabel(); anKeys(); });
@@ -2053,7 +2062,7 @@ function ugPickDev(i){
     if (UG.devs.length >= 8){ ugMsg('最多同时看 8 台'); return; }
     UG.devs.push(k.key);
   }
-  ugDevItems(); ugDevLabel(); ugLoad();   // 不关弹层，可连续勾选
+  ugDevItems(); ugDevLabel(); ugSaveSel(); ugLoad();   // 不关弹层，可连续勾选
 }
 function ugWinItems(){
   var pop = document.getElementById('ugWinPop'); if (!pop) return;
@@ -2065,13 +2074,18 @@ function ugPickWin(i){
   var w = AN_WINS[i]; if (!w) return;
   UG.win = w[0];
   var lab = document.getElementById('ugWinLab'); if (lab) lab.textContent = w[1];
-  ugWinItems(); ddCloseAll(); ugLoad();
+  ugWinItems(); ddCloseAll(); ugSaveSel(); ugLoad();
 }
 function ugInit(){
-  if (!UG.inited){
-    UG.inited = true;
-    if (!UG.devs.length && AN.key) UG.devs = [AN.key];
+  UG.inited = true;
+  // 持久化恢复的设备若已不在近 48h 活跃列表里则剔除（设备退役/换 key 后不留僵尸行）
+  if ((AN.devs || []).length && UG.devs.length){
+    var valid = [];
+    for (var q = 0; q < UG.devs.length; q++)
+      for (var q2 = 0; q2 < AN.devs.length; q2++) if (AN.devs[q2].key === UG.devs[q]) { valid.push(UG.devs[q]); break; }
+    UG.devs = valid;
   }
+  if (!UG.devs.length && AN.key) UG.devs = [AN.key];   // 空/全失效回落当前设备
   var wl = document.getElementById('ugWinLab');
   if (wl) for (var i = 0; i < AN_WINS.length; i++) if (AN_WINS[i][0] === UG.win) wl.textContent = AN_WINS[i][1];
   ugBind(); ugDevItems(); ugDevLabel(); ugWinItems(); ugLoad();
