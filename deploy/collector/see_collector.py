@@ -100,6 +100,21 @@ class Gateway(object):
         self.login_ts = time.time()
         return True
 
+    def relogin(self):
+        """退出登录（清 Cookie）→ 重新登录 → 验证 allInfo 有 JSON。"""
+        self.http.jar.clear()   # 清 Cookie = 退出
+        self.login_ts = 0.0
+        ok = self.login()
+        st, txt = self.allinfo()
+        has_json = txt.lstrip().startswith('{')
+        log('网关重连：login=%s allInfo=%s (HTTP %s, %d字节)' % (ok, has_json, st, len(txt)))
+        return ok and has_json
+
+    def raw_allinfo(self):
+        """返回 allInfo 原始文本（诊断用）。"""
+        st, txt = self.allinfo()
+        return st, txt
+
     def allinfo(self):
         """返回 (status, 文本)。文本以 { 开头才算登录成功。"""
         if time.time() - self.login_ts > REL_LOGIN:
@@ -169,6 +184,7 @@ class Collector(object):
         self.buf = []
         self.known = {}          # devkey -> (name, ip, last_seen_ts, link)
         self.cfg_ts = 0.0
+        self.cmd_ts = 0.0
         self.on_ts = 0.0          # 最近一次「只拉开关」的时间
         self.off_log = 0.0        # 暂停期间日志节流
         self.up_log = 0.0         # 上传日志节流（间隔缩小后不然刷屏）
@@ -481,6 +497,41 @@ class Collector(object):
             log('✓ 上传：%d 条' % n)
         return ok
 
+    def poll_cmd(self):
+        """轮询服务器指令（/api/gw/cmd，机器密钥）。"""
+        try:
+            st, txt = self.http.get(self.api + '/api/gw/cmd', {'X-See-Key': self.key})
+            j = json.loads(txt)
+            cmd = (j or {}).get('cmd') or ''
+            if cmd:
+                log('收到服务器指令：%s' % cmd)
+                self.exec_cmd(cmd)
+                # 回报结果并清除指令
+                self.http.post(self.api + '/api/gw/cmd',
+                               json.dumps({'done': cmd}).encode(),
+                               {'Content-Type': 'application/json', 'X-See-Key': self.key})
+        except Exception:
+            pass   # 指令通道静默失败（不影响采样）
+
+    def exec_cmd(self, cmd):
+        if cmd == 'gw_relogin':
+            try:
+                self.gateway().relogin()
+            except Exception as e:  # noqa: BLE001
+                log('网关重连异常：%s' % e)
+        elif cmd == 'gw_diag':
+            try:
+                gw = self.gateway()
+                st, txt = gw.raw_allinfo()
+                # 截取前 8KB 上报（够诊断字段结构）
+                snip = txt[:8192]
+                self.http.post(self.api + '/api/gw/diag',
+                               json.dumps({'status': st, 'body': snip}).encode(),
+                               {'Content-Type': 'application/json', 'X-See-Key': self.key})
+                log('诊断已上报（HTTP %s, %d 字节）' % (st, len(txt)))
+            except Exception as e:  # noqa: BLE001
+                log('诊断上报异常：%s' % e)
+
     def run(self, interval=10, upload_every=10, cfg_every=20):
         log('see 采集器启动：api=%s 采样 %ds / 上传 %ds / 开关 %ds'
             % (self.api, interval, upload_every, cfg_every))
@@ -500,6 +551,10 @@ class Collector(object):
                     time.sleep(5)
                     continue
                 # 采样/上传间隔可由服务器配置下发（sampleEvery/uploadEvery，0=沿用启动参数）
+                # 指令通道：20 秒对一次（与 on/off 并行）
+                if time.time() - self.cmd_ts > 20:
+                    self.cmd_ts = time.time()
+                    self.poll_cmd()
                 if time.time() - last_up >= (int(self.cfg.get('uploadEvery') or 0) or upload_every):
                     last_up = time.time()
                     n = self.flush()

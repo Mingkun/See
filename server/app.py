@@ -1205,6 +1205,52 @@ def api_gw_on():
     return jsonify(ok=True, on=_eff_on(cfg), now=int(time.time()))
 
 
+_GW_CMD = {'cmd': '', 'ts': 0}   # 内存指令（GET 给采集器、POST 写入/清除）
+
+
+@app.route('/api/gw/cmd', methods=['OPTIONS', 'GET', 'POST'])
+def api_gw_cmd():
+    """采集器指令通道：GET 拿指令（one-shot），POST 由采集器回报 done 清除；会话可发 relogin/diag。"""
+    if request.method == 'OPTIONS':
+        return _opt('GET, POST, OPTIONS')
+    kind = _auth_kind()
+    if kind not in ('key', 'session'):
+        return _deny()
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        if data.get('done'):
+            _GW_CMD['cmd'] = ''
+            return jsonify(ok=True)
+        # 会话发指令（网页/APP 按钮）；采集器（key）只允许 done 回报
+        if kind == 'session' and data.get('cmd') in ('gw_relogin', 'gw_diag'):
+            _GW_CMD['cmd'] = data['cmd']
+            _GW_CMD['ts'] = int(time.time())
+            return jsonify(ok=True)
+        return jsonify(ok=False, error='无效指令'), 400
+    # GET：采集器取指令（one-shot 不清——由 POST done 清，防采集器没收到）
+    if time.time() - _GW_CMD['ts'] > 300:   # 5 分钟过期
+        _GW_CMD['cmd'] = ''
+    return jsonify(ok=True, cmd=_GW_CMD['cmd'])
+
+
+@app.route('/api/gw/diag', methods=['OPTIONS', 'POST'])
+def api_gw_diag():
+    """采集器上报网关 allInfo 原始响应（诊断用），存 data/gw-diag.json。仅机器密钥。"""
+    if request.method == 'OPTIONS':
+        return _opt('POST, OPTIONS')
+    if _auth_kind() != 'key':
+        return _deny()
+    data = request.get_json(silent=True) or {}
+    out = {'ts': int(time.time()), 'status': data.get('status'), 'body': str(data.get('body') or '')[:8192]}
+    try:
+        import json as _j
+        with open(os.path.join(ROOT, 'data', 'gw-diag.json'), 'w', encoding='utf-8') as f:
+            _j.dump(out, f, ensure_ascii=False, indent=1)
+    except OSError:
+        pass
+    return jsonify(ok=True)
+
+
 @app.route('/api/gw/keys', methods=['OPTIONS', 'GET'])
 def api_gw_keys():
     if request.method == 'OPTIONS':

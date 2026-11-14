@@ -415,6 +415,11 @@ button, button *, .btn, .btn *, .tab, .tab * { -webkit-user-select:none; user-se
       <button type="button" id="obsSrcBtnL" class="btn ghost" onclick="obsSrcSet('local')">本机客户端</button>
     </div>
     <div id="obsSrcOut" class="sub mt-2"></div>
+    <div class="row mt-2">
+      <button type="button" class="btn" onclick="gwCmd('gw_relogin')">🔄 重连网关</button>
+      <button type="button" class="btn ghost" onclick="gwCmd('gw_diag')">🔍 诊断网关</button>
+      <span class="sub" id="gwCmdOut" style="margin-left:6px"></span>
+    </div>
     <div class="sec">访问与安全</div>
     <div class="sub ml-0 mt-1">采集器密钥只给家里的微服用（装采集器时填）。别外传，也别贴到聊天里。</div>
     <div class="row mt-2">
@@ -864,6 +869,16 @@ var CFG_URL = 'https://5130599.best/see/api/config';
 var API = 'https://5130599.best/see/api';
 // 页面里不再内嵌任何密钥：改用「口令换来的会话令牌」，存在本机 localStorage。
 function sess(){ try { return localStorage.getItem('seeSess') || ''; } catch(e) { return ''; } }
+function gwCmd(cmd){
+  var out = document.getElementById('gwCmdOut'); if (out) out.textContent = '发送中…';
+  apiFetch('/api/gw/cmd', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cmd: cmd }) })
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      if (out) out.textContent = j.ok ? '✅ 已下发，约20秒后生效' : '❌ ' + (j.error || '失败');
+    })
+    .catch(function(){ if (out) out.textContent = '❌ 网络错误'; });
+}
 function setSess(v){ try { v ? localStorage.setItem('seeSess', v) : localStorage.removeItem('seeSess'); } catch(e) {} }
 function apiFetch(url, opts){
   opts = opts || {};
