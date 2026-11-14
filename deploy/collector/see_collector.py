@@ -115,6 +115,23 @@ class Gateway(object):
         st, txt = self.allinfo()
         return st, txt
 
+    def fetch(self, path):
+        """按需抓取任意已登录页面（诊断用），返回 (status, 文本)。"""
+        if time.time() - self.login_ts > REL_LOGIN:
+            self.login()
+        st, txt = self._raw_get(path)
+        # 登录页特征：带 name="psd" 且不含设备表 —— 说明会话被顶掉，重登一次再取
+        if 'name="psd"' in txt or 'name=\"psd\"' in txt:
+            self.login()
+            st, txt = self._raw_get(path)
+        return st, txt
+
+    def _raw_get(self, path):
+        try:
+            return self.http.get('http://%s%s' % (self.ip, path), {'User-Agent': UA})
+        except Exception as e:  # noqa: BLE001
+            return -1, '请求异常：%s' % e
+
     def allinfo(self):
         """返回 (status, 文本)。文本以 { 开头才算登录成功。"""
         if time.time() - self.login_ts > REL_LOGIN:
@@ -505,7 +522,7 @@ class Collector(object):
             cmd = (j or {}).get('cmd') or ''
             if cmd:
                 log('收到服务器指令：%s' % cmd)
-                self.exec_cmd(cmd)
+                self.exec_cmd(cmd, (j or {}).get('payload') or {})
                 # 回报结果并清除指令
                 self.http.post(self.api + '/api/gw/cmd',
                                json.dumps({'done': cmd}).encode(),
@@ -513,7 +530,8 @@ class Collector(object):
         except Exception:
             pass   # 指令通道静默失败（不影响采样）
 
-    def exec_cmd(self, cmd):
+    def exec_cmd(self, cmd, payload=None):
+        payload = payload or {}
         if cmd == 'gw_relogin':
             try:
                 self.gateway().relogin()
@@ -531,6 +549,29 @@ class Collector(object):
                 log('诊断已上报（HTTP %s, %d 字节）' % (st, len(txt)))
             except Exception as e:  # noqa: BLE001
                 log('诊断上报异常：%s' % e)
+        elif cmd == 'gw_get':
+            self.cmd_gw_get(payload)
+
+    def cmd_gw_get(self, payload):
+        """按服务器下发的路径列表抓页面（原始前 6KB），一次性回报。"""
+        paths = payload.get('paths') or ([payload.get('path')] if payload.get('path') else [])
+        paths = [str(x) for x in paths if x][:12]
+        if not paths:
+            return
+        gw = self.gateway()
+        pages = {}
+        for pth in paths:
+            st, txt = gw.fetch(pth)
+            pages[pth] = {'status': st, 'len': len(txt), 'body': txt[:6000]}
+            log('抓取 %s → HTTP %s，%d 字节' % (pth, st, len(txt)))
+        try:
+            self.http.post(self.api + '/api/gw/diag',
+                           json.dumps({'pages': pages,
+                                       'name': payload.get('name') or 'pages'}).encode(),
+                           {'Content-Type': 'application/json', 'X-See-Key': self.key})
+            log('页面抓取已上报（%d 个）' % len(pages))
+        except Exception as e:  # noqa: BLE001
+            log('页面抓取上报异常：%s' % e)
 
     def run(self, interval=10, upload_every=10, cfg_every=20):
         log('see 采集器启动：api=%s 采样 %ds / 上传 %ds / 开关 %ds'

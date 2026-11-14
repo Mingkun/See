@@ -1205,7 +1205,7 @@ def api_gw_on():
     return jsonify(ok=True, on=_eff_on(cfg), now=int(time.time()))
 
 
-_GW_CMD = {'cmd': '', 'ts': 0}   # 内存指令（GET 给采集器、POST 写入/清除）
+_GW_CMD = {'cmd': '', 'ts': 0, 'payload': {}}   # 内存指令（GET 给采集器、POST 写入/清除）
 
 
 @app.route('/api/gw/cmd', methods=['OPTIONS', 'GET', 'POST'])
@@ -1220,17 +1220,20 @@ def api_gw_cmd():
         data = request.get_json(silent=True) or {}
         if data.get('done'):
             _GW_CMD['cmd'] = ''
+            _GW_CMD['payload'] = {}
             return jsonify(ok=True)
         # 会话发指令（网页/APP 按钮）；采集器（key）只允许 done 回报
-        if kind in ('sess', 'key') and data.get('cmd') in ('gw_relogin', 'gw_diag'):
+        if kind in ('sess', 'key') and data.get('cmd') in ('gw_relogin', 'gw_diag', 'gw_get'):
             _GW_CMD['cmd'] = data['cmd']
             _GW_CMD['ts'] = int(time.time())
+            _GW_CMD['payload'] = {k: data.get(k) for k in ('path', 'paths', 'name') if data.get(k)}
             return jsonify(ok=True)
         return jsonify(ok=False, error='无效指令'), 400
     # GET：采集器取指令（one-shot 不清——由 POST done 清，防采集器没收到）
     if time.time() - _GW_CMD['ts'] > 300:   # 5 分钟过期
         _GW_CMD['cmd'] = ''
-    return jsonify(ok=True, cmd=_GW_CMD['cmd'])
+        _GW_CMD['payload'] = {}
+    return jsonify(ok=True, cmd=_GW_CMD['cmd'], payload=_GW_CMD['payload'])
 
 
 @app.route('/api/gw/diag', methods=['OPTIONS', 'POST'])
@@ -1241,14 +1244,21 @@ def api_gw_diag():
     if _auth_kind() != 'key':
         return _deny()
     data = request.get_json(silent=True) or {}
-    out = {'ts': int(time.time()), 'status': data.get('status'), 'body': str(data.get('body') or '')[:8192]}
+    if data.get('pages'):
+        out = {'ts': int(time.time()), 'pages': data.get('pages')}
+    else:
+        out = {'ts': int(time.time()), 'status': data.get('status'),
+               'body': str(data.get('body') or '')[:8192]}
+    # name 只允许字母数字下划线横线，防路径穿越；无 name 沿用 gw-diag.json
+    name = re.sub(r'[^A-Za-z0-9_-]', '', str(data.get('name') or ''))[:32]
+    fn = 'gw-diag-%s.json' % name if name else 'gw-diag.json'
     try:
         import json as _j
-        with open(os.path.join(ROOT, 'data', 'gw-diag.json'), 'w', encoding='utf-8') as f:
+        with open(os.path.join(ROOT, 'data', fn), 'w', encoding='utf-8') as f:
             _j.dump(out, f, ensure_ascii=False, indent=1)
     except OSError:
         pass
-    return jsonify(ok=True)
+    return jsonify(ok=True, file=fn)
 
 
 @app.route('/api/gw/keys', methods=['OPTIONS', 'GET'])
