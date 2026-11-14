@@ -1,1 +1,1 @@
-{"versionCode": 181, "versionName": "3.70", "size": 2128178, "md5": "ccabc02a3abdd82584bdb2e102aa6831", "note": "分析页：平均速率=最近5次采样均值，峰值改为单次速率", "apkUrl": "https://5130599.best/see/downloads/see-android.apk"}
+{"versionCode": 182, "versionName": "3.71", "size": 2128166, "md5": "a23d34de1516c7a82edfcd2d1c72d398", "note": "分时表「峰值」列改名；采样周期降为 10 秒（采集器同步更新）", "apkUrl": "https://5130599.best/see/downloads/see-android.apk"}

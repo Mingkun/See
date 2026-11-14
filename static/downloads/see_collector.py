@@ -33,6 +33,8 @@ import urllib.request
 
 UA = 'Mozilla/5.0 (Linux; Android 14)'
 REL_LOGIN = 3600         # 兜底重登阈值（秒）：正常靠 cookie 保持会话，掉登录页才重登
+LOGIN_GAP = 20           # 两次登录的最小间隔（秒）：10 秒轮询下防止「取不到就重登」连环刷，
+                         # 网关只允许一个管理员会话，连续 POST /cgi-bin/luci 会自己顶自己
 ABSENT_TTL = 25 * 3600   # 缺席超过这个时间就不再补 present=0（与 app 的 25h 同口径）
 
 
@@ -92,6 +94,9 @@ class Gateway(object):
         self.logins = 0
 
     def login(self):
+        # 刚登过就别再登：同一会话连着 POST 会把上一个会话顶掉，等于自废 cookie
+        if self.login_ts and time.time() - self.login_ts < LOGIN_GAP:
+            return False
         form = urllib.parse.urlencode({'username': self.user, 'psd': self.pw}).encode()
         try:
             self.http.post('http://%s/cgi-bin/luci' % self.ip, form,
@@ -340,6 +345,8 @@ class Collector(object):
         self.was_enabled = None   # 上一轮开关状态（None=首轮）：用于「暂停让出光猫」「恢复重登」
         self.cpu = None           # 光猫 CPU 使用率（%），随采样一起上报
         self.up_sec = 0           # 光猫已运行秒数
+        self.rnd = 0              # 采样轮次（CPU 隔轮取用）
+        self.cost_log = 0.0       # 「本轮耗时」日志节流
 
     # ---------- 服务器：配置 ----------
     def refresh_cfg(self):
@@ -447,14 +454,17 @@ class Collector(object):
             speeds, devcnt, dst = gw.devinfo_speeds()
         except Exception as e:  # noqa: BLE001
             log('devInfo 速率读取失败：%s' % e)
-        # 光猫自身指标（CPU%）：独立接口，取不到不影响采样
-        try:
-            gs = gw.gwstatus()
-            if gs:
-                self.cpu = float(gs.get('cpuUsed'))
-                self.up_sec = int(gs.get('upTime') or 0)
-        except Exception:  # noqa: BLE001
-            pass
+        # 光猫自身指标（CPU%）：独立接口，取不到不影响采样。
+        # 10 秒轮询下不必每轮都取：CPU 3 轮一更（约 30 秒），少一次往返好让整轮挤进采样周期。
+        self.rnd = getattr(self, 'rnd', 0) + 1
+        if self.rnd % 3 == 1 or self.cpu is None:
+            try:
+                gs = gw.gwstatus()
+                if gs:
+                    self.cpu = float(gs.get('cpuUsed'))
+                    self.up_sec = int(gs.get('upTime') or 0)
+            except Exception:  # noqa: BLE001
+                pass
 
         if speeds:
             hit = 0
@@ -846,8 +856,14 @@ class Collector(object):
             except Exception as e:  # noqa: BLE001
                 log('循环异常（忽略并继续）：%s' % e)
                 time.sleep(5)
-            # 按「整轮周期」计时：采集本身要十几秒，直接 sleep(30) 会变成 44 秒一轮
-            time.sleep(max(1, (int(self.cfg.get('sampleEvery') or 0) or interval) - (time.time() - t0)))
+            # 按「整轮周期」计时：采集本身要十几秒，直接 sleep(N) 会变成 N+十几秒一轮
+            _iv = int(self.cfg.get('sampleEvery') or 0) or interval
+            _cost = time.time() - t0
+            if time.time() - self.cost_log >= 60:
+                self.cost_log = time.time()
+                log('本轮耗时 %.1fs（周期 %ds，登录累计 %d 次）'
+                    % (_cost, _iv, getattr(self.gw, 'logins', 0) if self.gw else 0))
+            time.sleep(max(0.5, _iv - _cost))
 
 
 def main():
