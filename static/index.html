@@ -205,6 +205,8 @@ button, button *, .btn, .btn *, .tab, .tab * { -webkit-user-select:none; user-se
   .chart-svg { width:100%; height:200px; display:block; background:#fbfcfe; border:1px solid #eef1f6; border-radius:var(--r-2); }
   /* 分析页「实时」卡片：两个速率格 + 镜像柱状图（中线以上下行、以下上行） */
   .chart-live { height:112px; }
+  /* 流量负载分析：柱子等比例压缩 1/3（200→133）；:not(.chart-fs) 防止 id 选择器盖过全屏的 100vh */
+  #anChart:not(.chart-fs) { height:133px; }
   .lvrow { display:flex; gap:var(--sp-2); margin-bottom:var(--sp-2); }
   .lvbox { flex:1; min-width:0; background:#f7f9fc; border:1px solid #eef1f6; border-radius:var(--r-2);
            padding:7px var(--pad-x); }
