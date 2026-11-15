@@ -1804,10 +1804,21 @@ function anKeys(){
 /* ---- 分析页「实时」卡片 ----
    数据来自 /api/gw/live：采集器逐档（默认 10 秒）上报的原始采样，下行/上行分开。
    卡片自己每 3 秒轮一次；新鲜度由「采样间隔 + 上传间隔」决定，所以标题栏标了「N 秒前」。 */
-var LV = { timer: null, busy: false, secs: 1800 };
+var LV = { timer: null, busy: false, busyAt: 0, secs: 1800 };
 var LV_STEP = 30;                 // 一档 = 30 秒（跟采集器采样间隔对齐）
 function anLiveVisible(){ var v = document.getElementById('viewAn'); return !!v && v.style.display !== 'none'; }
-function anLiveStart(){ if (!LV.timer) LV.timer = setInterval(function(){ if (anLiveVisible()) anLiveLoad(); }, 3000); }
+function anLiveStart(){
+  if (LV.timer) return;
+  LV.timer = setInterval(function(){
+    // 看门狗：fetch 挂起不归（手机切网/连接僵死）会让 busy 永远为真、卡片冻结，15 秒强制复位
+    if (LV.busy && LV.busyAt && Date.now() - LV.busyAt > 15000) LV.busy = false;
+    if (anLiveVisible()) anLiveLoad();
+  }, 3000);
+}
+document.addEventListener('visibilitychange', function(){
+  // 浏览器后台会把 3 秒定时器节流到约 1 次/分钟：回前台立即补一次，别让卡片停在上次的数据
+  if (!document.hidden && anLiveVisible()) anLiveLoad();
+});
 function anLiveStop(){ if (LV.timer){ clearInterval(LV.timer); LV.timer = null; } }
 function anLiveAgeText(j){
   if (!j || !j.ts) return '还没有采样';
@@ -1819,13 +1830,22 @@ function anLiveAgeText(j){
 function anLiveLoad(){
   if (LV.busy || !AN.key) return;
   LV.busy = true;
-  apiFetch(API + '/gw/live?dev=' + encodeURIComponent(AN.key) + '&secs=' + LV.secs)
+  LV.busyAt = Date.now();
+  var ctl = ('AbortController' in window) ? new AbortController() : null;
+  var to = ctl ? setTimeout(function(){ try { ctl.abort(); } catch (e) {} }, 10000) : null;
+  var opts = ctl ? { signal: ctl.signal } : {};
+  apiFetch(API + '/gw/live?dev=' + encodeURIComponent(AN.key) + '&secs=' + LV.secs, opts)
     .then(function(r){ return r.json(); })
     .then(function(j){
       LV.busy = false;
+      if (to) clearTimeout(to);
       if (j && j.ok) anLiveRender(j); else anLiveMsg('⚠ ' + ((j && j.error) || '读取失败'));
     })
-    .catch(function(){ LV.busy = false; anLiveMsg('⚠ 服务器连接失败'); });
+    .catch(function(){
+      LV.busy = false;
+      if (to) clearTimeout(to);
+      anLiveMsg('⚠ 服务器连接失败');
+    });
 }
 function anLiveMsg(t){ var h = document.getElementById('lvHint'); if (h) h.textContent = t; }
 function anLiveReset(){

@@ -1,1 +1,1 @@
-{"versionCode":190,"versionName":"3.79","size":2136250,"md5":"91fe4416bc733b0e16a0810b87dea95b","note":"操作判定加内容门槛：游戏挂机/心跳类周期小包不再误判为人在使用（需下行中位≥3K或单次下行≥300KB），新增「无人操作（挂机/心跳）」判定","apkUrl":"https://5130599.best/see/downloads/see-android.apk"}
+{"versionCode":191,"versionName":"3.80","size":2136630,"md5":"9d65c5dbb3e147670c64fd1602588c2e","note":"修复「实时」卡片可能永久停更：实时请求加10秒超时+15秒看门狗（连接僵死不再卡死刷新），回前台立即补刷一次（防浏览器后台节流）","apkUrl":"https://5130599.best/see/downloads/see-android.apk"}
