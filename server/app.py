@@ -1,6 +1,5 @@
 # coding: utf-8
 """see — LAN/WiFi client monitor: Flask API + scanner + gateway traffic monitor."""
-import base64
 import hashlib
 import hmac
 import ipaddress
@@ -197,18 +196,6 @@ def api_device():
                    apps=monitor.apps(ip) if GATEWAY else [],
                    today=_live_today(ip) if GATEWAY else {'up': 0, 'down': 0},
                    session=monitor.totals(ip) if GATEWAY else {'up': 0, 'down': 0})
-
-
-# ---------- 截图测速：GLM 视觉 OCR ----------
-_OCR_LIMITS = {}
-
-
-def _zai_key():
-    try:
-        data = json.loads(open('/root/.openclaw/secrets.json', encoding='utf-8').read())
-        return data.get('models', {}).get('providers', {}).get('zai', {}).get('apiKey')
-    except Exception:
-        return None
 
 
 # 允许携带凭据的来源：公网页 + 手机 app 内置页面(127.0.0.1:5050)。
@@ -1590,36 +1577,6 @@ def api_gw_live():
                    samples=samples)
 
 
-def _parse_bytes(txt):
-    import re
-    if not txt:
-        return None
-    m = re.search(r'([\d,\.]+)\s*(TB|GB|MB|KB|B|字节)?', str(txt), re.I)
-    if not m:
-        return None
-    num, unit = m.group(1), (m.group(2) or 'B').upper()
-    if unit == '字节':
-        unit = 'B'
-    if ',' in num and '.' in num:
-        num = num.replace(',', '')
-    elif ',' in num:
-        num = num.replace(',', '')
-    elif num.count('.') > 1:
-        parts = num.split('.')
-        if len(parts[-1]) <= 2:
-            num = ''.join(parts[:-1]) + '.' + parts[-1]
-        else:
-            num = num.replace('.', '')
-    try:
-        v = float(num)
-    except Exception:
-        return None
-    mul = {'B': 1, 'KB': 1024, 'MB': 1024 ** 2, 'GB': 1024 ** 3, 'TB': 1024 ** 4}.get(unit)
-    if mul is None:
-        return None
-    return int(v * mul)
-
-
 @app.route('/api/gw/plan', methods=['OPTIONS', 'POST'])
 def api_gw_plan():
     if request.method == 'OPTIONS':
@@ -1653,63 +1610,3 @@ def api_gw_report():
     except Exception:
         pass
     return jsonify(ok=True)
-
-
-@app.post('/api/snapshots/ocr')
-def api_snap_ocr():
-    if _auth_kind() is None:
-        return _deny()
-    ip = request.remote_addr or '?'
-    now = time.time()
-    cnt, win = _OCR_LIMITS.get(ip, (0, now))
-    if now - win > 3600:
-        cnt, win = 0, now
-    cnt += 1
-    _OCR_LIMITS[ip] = (cnt, win)
-    if cnt > 12:
-        return jsonify(ok=False, error='请求太频繁，请一小时后再试'), 429
-    key = _zai_key()
-    if not key:
-        return jsonify(ok=False, error='视觉模型密钥未配置'), 500
-    f = request.files.get('image')
-    if f is None:
-        return jsonify(ok=False, error='缺少图片'), 400
-    data = f.read()
-    if len(data) < 100 or len(data) > 8 * 1024 * 1024:
-        return jsonify(ok=False, error='图片无效或超过8MB'), 400
-    mime = f.mimetype if (f.mimetype or '').startswith('image/') else 'image/jpeg'
-    b64 = base64.b64encode(data).decode('ascii')
-    prompt = ('从截图逐字照抄网络流量累计数值，返回纯JSON不要markdown不要换算：'
-              '{"up_text": "上行/发送/上传的累计数值和单位原样照抄(如 1,014.44MB 或 123456789字节)；同一数值若有多种单位表示只抄精度最高的(优先MB/KB详值，其次GB)；没有则null", '
-              '"down_text": "下行/接收/下载的累计数值和单位原样照抄，规则同上；没有则null", '
-              '"time_text": "截图中可见的连接时长或时间文字，没有则null"}。'
-              '只要累计流量值，忽略速率(如KB/s)、限速阈值、信号强度等无关数字。')
-    payload = json.dumps({
-        'model': 'glm-4.6v',
-        'messages': [{'role': 'user', 'content': [
-            {'type': 'image_url', 'image_url': {'url': 'data:%s;base64,%s' % (mime, b64)}},
-            {'type': 'text', 'text': prompt},
-        ]}],
-        'temperature': 0.1, 'max_tokens': 2000,
-    }).encode()
-    req = urllib.request.Request(
-        'https://api.z.ai/api/coding/paas/v4/chat/completions', data=payload, method='POST',
-        headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key})
-    try:
-        with urllib.request.urlopen(req, timeout=90) as resp:
-            out = json.loads(resp.read().decode('utf-8'))
-        text = (out['choices'][0]['message']['content'] or '').strip()
-    except Exception as e:
-        return jsonify(ok=False, error='识别失败: %s' % e), 502
-    t = text.strip('`').strip()
-    if t[:4].lower() == 'json':
-        t = t[4:].strip()
-    try:
-        parsed = json.loads(t)
-    except Exception:
-        parsed = {'up_bytes': None, 'down_bytes': None, 'time_text': text[:120]}
-    up = _parse_bytes(parsed.get('up_text'))
-    down = _parse_bytes(parsed.get('down_text'))
-    return jsonify(ok=True, up=up, down=down,
-                   up_text=parsed.get('up_text'), down_text=parsed.get('down_text'),
-                   time_text=parsed.get('time_text'), raw=text[:300])
