@@ -1,1 +1,1 @@
-{"versionCode":198,"versionName":"3.87","size":2139722,"md5":"d587409befbf23dc8b483789b4616aed","note":"回滚 3.86 的三态改动：流量负载分析/分时用量/时间线恢复原口径（保留 v3.85 的真实速率单位与 50 Kbps 阈值）","apkUrl":"https://5130599.best/see/downloads/see-android.apk"}
+{"versionCode":199,"versionName":"3.88","size":2139726,"md5":"cd2480674d13ed836f2035740e2714eb","note":"繁忙阈值 50 Kbps -> 20 Kbps：手机近 24 小时繁忙分钟由 40% 升到 58%，仍高于空闲基线","apkUrl":"https://5130599.best/see/downloads/see-android.apk"}

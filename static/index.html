@@ -2349,7 +2349,7 @@ function anLoad(){
     .then(function(j){ if (!j || !j.ok) { document.getElementById('anSub').textContent = '❌ ' + ((j && j.error) || '失败'); return; } anRender(j); anLiveLoad(); })
     .catch(function(){ document.getElementById('anSub').textContent = '服务器连接失败'; });
 }
-var AN_BUSY = 62500;      // 「繁忙」阈值 = 合计（上行+下行）单次采样峰值 ≥ 50 Kbps（6250 B/s，库内单位是每 10 秒字节数，故 62500）；柱色、虚线、分时用量状态共用这一个值
+var AN_BUSY = 25000;      // 「繁忙」阈值 = 合计（上行+下行）单次采样峰值 ≥ 20 Kbps（2500 B/s，库内单位是每 10 秒字节数，故 25000）；柱色、虚线、分时用量状态共用这一个值
 function anDayLbl(sec){ var d = new Date(sec * 1000); return (d.getMonth() + 1) + '-' + d.getDate(); }
 function anHMin(sec){ var d = new Date(sec * 1000); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
 /* 时间线汇总：把所选设备合并（任一台有人用=这段在用），连续桶并成区间 */
