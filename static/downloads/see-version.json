@@ -1,1 +1,1 @@
-{"versionCode":195,"versionName":"3.84","size":2139610,"md5":"efb3f7ae023503cb4a75fa61fbd4d174","note":"「繁忙」阈值从 200K 下调到 50K（合计峰值），柱色与分时用量状态判定同步；使用时长汇总仍按形态判定","apkUrl":"https://5130599.best/see/downloads/see-android.apk"}
+{"versionCode":196,"versionName":"3.85","size":2139722,"md5":"9b17f75ad8531bd4a73bbf9b5ba3cc5c","note":"繁忙阈值按真实速率设为 50 Kbps；页面速率显示改为真实单位（此前把每 10 秒字节数当每秒显示，虚高 10 倍）","apkUrl":"https://5130599.best/see/downloads/see-android.apk"}

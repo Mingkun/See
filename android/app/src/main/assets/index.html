@@ -633,6 +633,8 @@ function cutTitle(name, tail, maxPx){
   return cutPx(name, maxPx);
 }
 function cutName(s, n){ s = (s == null ? '' : String(s)); if (!s) return ''; return s.length > n ? s.slice(0, n - 1) + '\u2026' : s; }
+// 库内 up/down 是「每 10 秒字节数」，显示前除以 10 才是真实 B/s
+function fmtRate10(b){ return fmtSpeed((b || 0) / 10); }
 function fmtSpeed(b){ if(!b||b<1) return '0'; if(b<1024) return b.toFixed(0)+' B/s'; if(b<1048576) return (b/1024).toFixed(1)+' K/s'; return (b/1048576).toFixed(2)+' M/s'; }
 function fmtBytes(b){ if(!b) return '0'; if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(1)+' KB'; if(b<1073741824) return (b/1048576).toFixed(1)+' MB'; return (b/1073741824).toFixed(2)+' GB'; }
 function fmtAgo(t){
@@ -1868,11 +1870,11 @@ function anLiveRender(j){
   }
   var ag = document.getElementById('anLiveAge'); if (ag) ag.textContent = anLiveAgeText(j);
   var e1 = document.getElementById('lvDown'), e2 = document.getElementById('lvUp');
-  if (e1) e1.textContent = fmtSpeed(j.down);
-  if (e2) e2.textContent = fmtSpeed(j.up);
+  if (e1) e1.textContent = fmtRate10(j.down);
+  if (e2) e2.textContent = fmtRate10(j.up);
   var s1 = document.getElementById('lvDownSub'), s2 = document.getElementById('lvUpSub');
-  if (s1) s1.textContent = '均 ' + fmtSpeed(j.avg_down) + '·峰 ' + fmtSpeed(j.peak_down);
-  if (s2) s2.textContent = '均 ' + fmtSpeed(j.avg_up) + '·峰 ' + fmtSpeed(j.peak_up);
+  if (s1) s1.textContent = '均 ' + fmtRate10(j.avg_down) + '·峰 ' + fmtRate10(j.peak_down);
+  if (s2) s2.textContent = '均 ' + fmtRate10(j.avg_up) + '·峰 ' + fmtRate10(j.peak_up);
   var hint = [];
   if (!j.n) hint.push('这台设备还没进这个窗口的采样');
   else if (!j.on_n) hint.push('整个窗口里网关都标它不在线');
@@ -1919,7 +1921,7 @@ function anLiveBars(j){
     var lbl = anHMin(frm + c * LV_STEP);
     var bt = !s2 ? ('<b>' + lbl + '</b><br>无数据')
            : (!s2[3] ? ('<b>' + lbl + '</b><br>不在线')
-                     : ('<b>' + lbl + '</b><br>↑ ' + fmtSpeed(s2[1]) + ' · ↓ ' + fmtSpeed(s2[2])));
+                     : ('<b>' + lbl + '</b><br>↑ ' + fmtRate10(s2[1]) + ' · ↓ ' + fmtRate10(s2[2])));
     var hd = (s2 && s2[3]) ? (s2[2] / maxD) * (ih / 2) : 0;
     var hu = (s2 && s2[3]) ? (s2[1] / maxU) * (ih / 2) : 0;
     var hUp = hu > 0.4, hDn = hd > 0.4;
@@ -1933,8 +1935,8 @@ function anLiveBars(j){
     if (hDn) p.push('<rect x="' + x0.toFixed(2) + '" y="' + mid.toFixed(1) + '" width="' + w.toFixed(2) + '" height="' + hd.toFixed(1) + '" fill="#2563eb" rx="0.6"/>');
   }
   p.push('<line x1="' + padL + '" y1="' + mid.toFixed(1) + '" x2="' + (padL + iw) + '" y2="' + mid.toFixed(1) + '" stroke="#dfe5ee"/>');
-  p.push('<text x="' + (padL - 4) + '" y="' + (padT + 8) + '" font-size="8" fill="#d97706" text-anchor="end">↑' + fmtSpeed(maxU) + '</text>');
-  p.push('<text x="' + (padL - 4) + '" y="' + (padT + ih - 1) + '" font-size="8" fill="#2563eb" text-anchor="end">↓' + fmtSpeed(maxD) + '</text>');
+  p.push('<text x="' + (padL - 4) + '" y="' + (padT + 8) + '" font-size="8" fill="#d97706" text-anchor="end">↑' + fmtRate10(maxU) + '</text>');
+  p.push('<text x="' + (padL - 4) + '" y="' + (padT + ih - 1) + '" font-size="8" fill="#2563eb" text-anchor="end">↓' + fmtRate10(maxD) + '</text>');
   p.push('<text x="' + padL + '" y="' + (H - 3) + '" font-size="8" fill="#9aa4b2">' + anHMin(frm) + ' 前</text>');
   p.push('<text x="' + (padL + iw) + '" y="' + (H - 3) + '" font-size="8" fill="#9aa4b2" text-anchor="end">现在</text>');
   if (svg.__sel != null && bars[svg.__sel]) p.push(chartMarkRect(bars[svg.__sel], padT, ih));
@@ -2084,8 +2086,8 @@ function anSceneRender(j){
       '<span class="scn-val ' + cl.c + '">' + cl.t + '</span></div>' +
       '<div class="scn-ev">操作判定：<span class="' + vd.c + '">' + vd.t + '</span><span class="c-muted"> · ' + vd.d + '</span></div>' +
       '<div class="scn-ev">' + cl.d + '</div>' +
-      '<div class="scn-ev"><span class="scn-num">' + s.n + ' 个采样 · ↑中位 ' + fmtSpeed(s.medU) +
-      ' · ↓中位 ' + fmtSpeed(s.medD) + ' · 静默 ' + Math.round(s.q * 100) + '% · 上行小包 ' + s.upSmall +
+      '<div class="scn-ev"><span class="scn-num">' + s.n + ' 个采样 · ↑中位 ' + fmtRate10(s.medU) +
+      ' · ↓中位 ' + fmtRate10(s.medD) + ' · 静默 ' + Math.round(s.q * 100) + '% · 上行小包 ' + s.upSmall +
       ' · 合计约 ' + fmtBytes(s.bytes) + '</span></div>';
   }
   if (box.__h !== html){ box.__h = html; box.innerHTML = html; }
@@ -2253,7 +2255,7 @@ function ugShow(ri, c){
   var cell = row[c], b = cell.b, v = cell.v;
   var line1 = anHMin(cell.t0) + '–' + anHMin(cell.t0 + 600) + ' · ' + cutName(nm, 14) + ' → ' + v.t;
   var line2 = !b ? '该 10 分钟没有采样（设备离线或采集器未上报）'
-    : b[0] + ' 个采样 · ↑中位 ' + fmtSpeed(b[1]) + ' · ↓中位 ' + fmtSpeed(b[2]) + ' · 静默 ' + Math.round(b[4] * 100) + '% · 上行小包 ' + b[6] + ' · 合计约 ' + fmtBytes(b[7]);
+    : b[0] + ' 个采样 · ↑中位 ' + fmtRate10(b[1]) + ' · ↓中位 ' + fmtRate10(b[2]) + ' · 静默 ' + Math.round(b[4] * 100) + '% · 上行小包 ' + b[6] + ' · 合计约 ' + fmtBytes(b[7]);
   var dd = document.getElementById('ugDetail');
   if (dd) dd.innerHTML = anHMin(cell.t0) + '–' + anHMin(cell.t0 + 600) + ' · ' + esc(cutName(nm, 14)) + ' → <b>' + v.t + '</b><br>' + line2;
   // 全屏时 #ugDetail 在图外看不见：详情同步画进 SVG 底部两行
@@ -2347,7 +2349,7 @@ function anLoad(){
     .then(function(j){ if (!j || !j.ok) { document.getElementById('anSub').textContent = '❌ ' + ((j && j.error) || '失败'); return; } anRender(j); anLiveLoad(); })
     .catch(function(){ document.getElementById('anSub').textContent = '服务器连接失败'; });
 }
-var AN_BUSY = 51200;      // 「繁忙」阈值 = 合计（上行+下行）单次采样峰值 ≥ 50 K（50×1024，库内单位是每 10 秒字节数）；柱色、虚线、分时用量状态共用这一个值
+var AN_BUSY = 62500;      // 「繁忙」阈值 = 合计（上行+下行）单次采样峰值 ≥ 50 Kbps（6250 B/s，库内单位是每 10 秒字节数，故 62500）；柱色、虚线、分时用量状态共用这一个值
 function anDayLbl(sec){ var d = new Date(sec * 1000); return (d.getMonth() + 1) + '-' + d.getDate(); }
 function anHMin(sec){ var d = new Date(sec * 1000); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
 /* 时间线汇总：把所选设备合并（任一台有人用=这段在用），连续桶并成区间 */
@@ -2426,7 +2428,7 @@ function anRender(j){
     }
   }
   p.push('<line x1="' + padL + '" y1="' + (padT + ih) + '" x2="' + (padL + iw) + '" y2="' + (padT + ih) + '" stroke="#dfe5ee"/>');
-  p.push('<text x="4" y="' + (padT + 8) + '" font-size="8" fill="#9aa4b2">' + fmtSpeed(maxV) + '</text>');
+  p.push('<text x="4" y="' + (padT + 8) + '" font-size="8" fill="#9aa4b2">' + fmtRate10(maxV) + '</text>');
   var bw = iw / groups, bars = [];
   var tiers = [], gpks = [];   // 每格档位/峰值，给「轻量+空闲」时段用（与分时用量同口径）
   var durMin = { busy: 0, chill: 0, idle: 0, none: 0 };   // 窗口内各状态累计时长（分钟），只累到当前所在的 1 分钟
@@ -2449,7 +2451,7 @@ function anRender(j){
     if (curG < 0 || g <= curG) durMin[tier === 'off' ? 'none' : tier] += G;
     var avUp = (upA && c) ? su / c : av / 2, avDn = (dnA && c) ? sd / c : av / 2;
     var ytop = (pk > 0) ? yv(pk) : null;   // 有真实柱子时记下柱顶，详情卡片靠它避让
-    bars.push({ x0: x0, x1: x0 + bw, yT: ytop, yB: padT + ih, tip: (isCur ? '⏱ 当前时段<br>' : '') + '<b>' + anHMin(t0) + '–' + anHMin(t1) + '</b><br>峰 ' + fmtSpeed(pk) + '（合计，柱高）· ' + stt + '<br>均 ' + fmtSpeed(av) + '（下 ' + fmtSpeed(avDn) + ' · 上 ' + fmtSpeed(avUp) + '）' });
+    bars.push({ x0: x0, x1: x0 + bw, yT: ytop, yB: padT + ih, tip: (isCur ? '⏱ 当前时段<br>' : '') + '<b>' + anHMin(t0) + '–' + anHMin(t1) + '</b><br>峰 ' + fmtRate10(pk) + '（合计，柱高）· ' + stt + '<br>均 ' + fmtRate10(av) + '（下 ' + fmtRate10(avDn) + ' · 上 ' + fmtRate10(avUp) + '）' });
     var rw = Math.max(bw - 0.4, 0.6).toFixed(2), fw = Math.max(bw, 0.6).toFixed(2);
     var curCls = isCur ? ' class="curblink"' : '';
     if (!any) p.push('<rect x="' + x0.toFixed(2) + '" y="' + padT + '" width="' + fw + '" height="' + ih + '" fill="#e9edf3"' + curCls + '/>');
@@ -2462,7 +2464,7 @@ function anRender(j){
     }
     else p.push('<rect x="' + x0.toFixed(2) + '" y="' + (padT + ih - 2) + '" width="' + rw + '" height="2" fill="' + tfill + '"' + curCls + '/>');
   }
-  // 合计（上行+下行）峰值参考线：50 K（浅黄虚线）。位置与柱色的分档阈值同源（都用 PKTH），
+  // 合计（上行+下行）峰值参考线：50 Kbps（浅黄虚线）。位置与柱色的分档阈值同源（都用 PKTH），
   // 且取在总量程上，所以线代表的就是「合计峰值」本身，不只是标签这么写。
   // 只在量程装得下时画：yv() 对超过量程的值会贴顶 clamp，全窗口都不到阈值时硬画会停住骗人。
   if (maxV >= PKTH){
@@ -2510,7 +2512,7 @@ function anRender(j){
   else {
     var shown = runs.slice(0, 40);
     sb.innerHTML = shown.map(function(r){
-      return '<tr><td class="num">' + anHMin(from + r.a * 60) + '–' + anHMin(from + r.b * 60) + '</td><td class="num">' + anFmtDur(r.len) + '</td><td class="sub">' + (r.lt ? '<span class="c-chill">轻量</span>' : '<span class="c-idle">空闲</span>') + '</td><td class="num">' + fmtSpeed(r.peak) + '</td></tr>';
+      return '<tr><td class="num">' + anHMin(from + r.a * 60) + '–' + anHMin(from + r.b * 60) + '</td><td class="num">' + anFmtDur(r.len) + '</td><td class="sub">' + (r.lt ? '<span class="c-chill">轻量</span>' : '<span class="c-idle">空闲</span>') + '</td><td class="num">' + fmtRate10(r.peak) + '</td></tr>';
     }).join('') + (runs.length > 40 ? '<tr><td colspan="4" class="hint">还有 ' + (runs.length - 40) + ' 段未显示</td></tr>' : '');
   }
   document.getElementById('anSleepPanel').style.display = '';
@@ -2539,7 +2541,7 @@ function anRender(j){
     var cur = j.now && t1 > j.now;   // 覆盖 now 的那一格 = 当前 1 分钟
     // 底色按自然日区分；不写日期文字
     var rcls = (cur || anDayLbl(t0) === today) ? 'today' : 'prev';
-    rows.push('<tr class="' + rcls + '"><td class="num' + (cur ? ' curhour' : '') + '">' + hlbl + '</td><td class="num">' + fmtSpeed(avgV) + '</td><td class="num">' + fmtSpeed(pkV) + '</td><td>' + st + '</td></tr>');
+    rows.push('<tr class="' + rcls + '"><td class="num' + (cur ? ' curhour' : '') + '">' + hlbl + '</td><td class="num">' + fmtRate10(avgV) + '</td><td class="num">' + fmtRate10(pkV) + '</td><td>' + st + '</td></tr>');
   }
   AN_HOUR_ASC = rows;
   paintHourRows();
