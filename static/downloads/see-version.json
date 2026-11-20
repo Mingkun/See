@@ -1,1 +1,1 @@
-{"versionCode":196,"versionName":"3.85","size":2139722,"md5":"9b17f75ad8531bd4a73bbf9b5ba3cc5c","note":"繁忙阈值按真实速率设为 50 Kbps；页面速率显示改为真实单位（此前把每 10 秒字节数当每秒显示，虚高 10 倍）","apkUrl":"https://5130599.best/see/downloads/see-android.apk"}
+{"versionCode":197,"versionName":"3.86","size":2140094,"md5":"85c5889eafe847df79b1bf65e711b809","note":"流量负载分析与分时用量改为使用/没使用/无数据三态，与使用时间线同一套判据（10 分钟桶）","apkUrl":"https://5130599.best/see/downloads/see-android.apk"}

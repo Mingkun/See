@@ -1467,7 +1467,7 @@ def api_gw_usegrid():
         return _deny()
     devs = [d.strip() for d in (request.args.get('devs') or '').split(',') if d.strip()]
     try:
-        hours = max(1, min(int(request.args.get('hours', 24)), 24))
+        hours = max(1, min(int(request.args.get('hours', 24)), 26))
     except Exception:  # noqa: BLE001
         hours = 24
     if not devs:

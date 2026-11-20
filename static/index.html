@@ -361,7 +361,7 @@ button, button *, .btn, .btn *, .tab, .tab * { -webkit-user-select:none; user-se
       <button type="button" onclick="anLoad()" class="btn">刷新</button>
     </div>
     <div class="pbody mt-1"><svg id="anChart" class="chart-svg"></svg></div>
-    <div class="sub legend" id="anLeg3"><span class="c-busy">▬</span> 繁忙 · <span class="c-chill">▬</span> 轻量 · <span class="c-idle">▬</span> 空闲 · <span class="c-muted">▬</span> 无数据<br>繁忙:<span id="anDurBusy"></span>，轻量:<span id="anDurChill"></span><br>空闲:<span id="anDurIdle"></span>，无数据:<span id="anDurNone"></span></div>
+    <div class="sub legend" id="anLeg3"><span class="c-busy">▬</span> 使用 · <span class="c-muted">▬</span> 没使用 · <span class="c-idle">▬</span> 无数据<br>使用:<span id="anDurUse"></span>，没使用:<span id="anDurNot"></span>，无数据:<span id="anDurNone"></span></div>
     <div class="scn" id="anScene"><div class="scn-ev">最近 10 分钟场景分析：等待采样…</div></div>
   </div>
   <div class="panel">
@@ -394,7 +394,7 @@ button, button *, .btn, .btn *, .tab, .tab * { -webkit-user-select:none; user-se
     <div class="hint" id="lvHint">—</div>
   </div>
   <div class="panel" id="anSleepPanel" style="display:none">
-    <div class="pt" style="cursor:pointer" onclick="toggleSleepBody()"><span>😴 轻量 + 空闲<span class="sub sub-inline" style="white-space:nowrap">（今天 · 连续 ≥10 分钟）</span></span><span id="sleepArrow" style="font-size:11px;color:var(--tx-dim);transition:transform .2s">▸</span></div>
+    <div class="pt" style="cursor:pointer" onclick="toggleSleepBody()"><span>😴 没使用<span class="sub sub-inline" style="white-space:nowrap">（今天 · 连续 ≥10 分钟）</span></span><span id="sleepArrow" style="font-size:11px;color:var(--tx-dim);transition:transform .2s">▸</span></div>
     <div class="scrollx" id="sleepBody" style="display:none">
       <table>
         <thead><tr><th>时段</th><th>时长</th><th>类型</th><th>期间峰值</th></tr></thead>
@@ -2346,7 +2346,14 @@ function anLoad(){
   document.getElementById('anSub').textContent = '加载中…';
   apiFetch(API + '/gw/series?dev=' + encodeURIComponent(AN.key) + '&hours=' + hrs)
     .then(function(r){ return r.json(); })
-    .then(function(j){ if (!j || !j.ok) { document.getElementById('anSub').textContent = '❌ ' + ((j && j.error) || '失败'); return; } anRender(j); anLiveLoad(); })
+    .then(function(j){
+      if (!j || !j.ok) { document.getElementById('anSub').textContent = '❌ ' + ((j && j.error) || '失败'); return; }
+      // 同一台设备的 10 分钟桶判定：让「使用/没使用」和「使用时间线」用同一套标准
+      return apiFetch(API + '/gw/usegrid?devs=' + encodeURIComponent(AN.key) + '&hours=' + Math.min(26, hrs + 2))
+        .then(function(r2){ return r2.json(); })
+        .catch(function(){ return null; })
+        .then(function(ug){ anRender(j, (ug && ug.ok) ? ug : null); anLiveLoad(); });
+    })
     .catch(function(){ document.getElementById('anSub').textContent = '服务器连接失败'; });
 }
 var AN_BUSY = 62500;      // 「繁忙」阈值 = 合计（上行+下行）单次采样峰值 ≥ 50 Kbps（6250 B/s，库内单位是每 10 秒字节数，故 62500）；柱色、虚线、分时用量状态共用这一个值
@@ -2396,7 +2403,27 @@ function ugSumText(sc){
 }
 function anDur2(min){ var h = Math.floor(min / 60), m = min % 60; return h + 'H' + (m < 10 ? '0' : '') + m + 'M'; }
 function anFmtDur(min){ if (min < 60) return Math.round(min) + '分'; return Math.floor(min / 60) + '时' + (Math.round(min % 60) ? Math.round(min % 60) + '分' : ''); }
-function anRender(j){
+function anUseMap(ug, from, n, nowS){
+  /* 把「使用时间线」的 10 分钟桶判定铺到每一分钟：undefined=无判定，true=使用，false=没使用 */
+  var out = new Array(n);
+  var ub = (ug && ug.ok && ug.devs && ug.devs.length) ? ug.devs[0] : null;
+  if (!ub) return out;
+  var ufrm = ug.frm || 0, ubk = ub.bk || [], unb = ug.nb || ubk.length;
+  if (!unb) return out;
+  for (var i = 0; i < n; i++){
+    var t = from + i * 60;
+    if (t > nowS) continue;                       // 未来时段不预判
+    var bi = Math.floor((t - ufrm) / 600);
+    if (bi < 0) continue;                         // 超出桶范围（更早）
+    if (bi >= unb) bi = unb - 1;                  // 尾部未走完的 10 分钟：沿用最后一个完整桶
+    var b = ubk[bi];
+    if (!b) continue;
+    var v = ugVerdict(b);
+    out[i] = !!v.used;
+  }
+  return out;
+}
+function anRender(j, ug){
   AN.last = j;
   var sp = j.speed || [], pr = j.present || [], hs = j.has || [];
   var pk1 = j.peak1 || null;   // 该分钟最高的一次采样（老服务端没有则回退为格均值）
@@ -2430,8 +2457,10 @@ function anRender(j){
   p.push('<line x1="' + padL + '" y1="' + (padT + ih) + '" x2="' + (padL + iw) + '" y2="' + (padT + ih) + '" stroke="#dfe5ee"/>');
   p.push('<text x="4" y="' + (padT + 8) + '" font-size="8" fill="#9aa4b2">' + fmtRate10(maxV) + '</text>');
   var bw = iw / groups, bars = [];
-  var tiers = [], gpks = [];   // 每格档位/峰值，给「轻量+空闲」时段用（与分时用量同口径）
-  var durMin = { busy: 0, chill: 0, idle: 0, none: 0 };   // 窗口内各状态累计时长（分钟），只累到当前所在的 1 分钟
+  var tiers = [], gpks = [];   // 每格档位/峰值，给「没使用时段」用（与分时用量同口径）
+  var durMin = { used: 0, notused: 0, none: 0 };   // 窗口内各状态累计时长（分钟），只累到当前所在的 1 分钟
+  var nowS0 = j.now || Math.floor(Date.now() / 1000);
+  var USE = anUseMap(ug, from, n, nowS0);   // 与「使用时间线」完全同一套判据
   var nowSec = j.now || Math.floor(Date.now() / 1000);
   // 当前时段 = 覆盖 now 的那一格（与分时用量表的 .curhour 同一格），整柱缓慢闪动标识
   var curG = (nowSec >= from && nowSec < from + n * 60) ? Math.floor((nowSec - from) / (G * 60)) : -1;
@@ -2442,13 +2471,14 @@ function anRender(j){
     var t0 = from + g * G * 60, t1 = from + Math.min((g + 1) * G, n) * 60;
     // 状态三档与「分时用量」一致：按峰值判 繁忙/轻量/空闲
     var isCur = (g === curG);
-    var tier = !any ? 'none' : (!pres ? 'off' : (pk >= PKTH ? 'busy' : (pk > 0 ? 'chill' : 'idle')));
-    tiers.push(tier === 'off' ? 'idle' : tier);   // 分时用量把不在线显示为空闲，时段卡同样并入
+    var uf = USE[g];
+    var tier = (!pres || uf === undefined) ? 'none' : (uf ? 'used' : 'notused');
+    tiers.push(tier);
     gpks.push(pk);
-    var stt = tier === 'none' ? '无数据' : (tier === 'off' ? '不在线' : (tier === 'busy' ? '繁忙' : (tier === 'chill' ? '轻量' : '空闲')));
-    var tfill = tier === 'busy' ? '#2563eb' : (tier === 'chill' ? '#16a34a' : '#69737f');
-    // 「不在线」在四档图例里并入「无数据」；未到时间的格子不计入任何档
-    if (curG < 0 || g <= curG) durMin[tier === 'off' ? 'none' : tier] += G;
+    var stt = tier === 'none' ? '无数据' : (tier === 'used' ? '使用' : '没使用');
+    var tfill = tier === 'used' ? '#2563eb' : '#c3ccd8';
+    // 未到时间的格子不计入任何档
+    if (curG < 0 || g <= curG) durMin[tier] += G;
     var avUp = (upA && c) ? su / c : av / 2, avDn = (dnA && c) ? sd / c : av / 2;
     var ytop = (pk > 0) ? yv(pk) : null;   // 有真实柱子时记下柱顶，详情卡片靠它避让
     bars.push({ x0: x0, x1: x0 + bw, yT: ytop, yB: padT + ih, tip: (isCur ? '⏱ 当前时段<br>' : '') + '<b>' + anHMin(t0) + '–' + anHMin(t1) + '</b><br>峰 ' + fmtRate10(pk) + '（合计，柱高）· ' + stt + '<br>均 ' + fmtRate10(av) + '（下 ' + fmtRate10(avDn) + ' · 上 ' + fmtRate10(avUp) + '）' });
@@ -2482,13 +2512,13 @@ function anRender(j){
   var i2 = 0;
   while (i2 < tiers.length){
     var tt = tiers[i2];
-    if (tt !== 'idle' && tt !== 'chill'){ i2++; continue; }
+    if (tt !== 'notused'){ i2++; continue; }
     var j2 = i2, pk2 = 0;
     while (j2 < tiers.length && tiers[j2] === tt){
       if (gpks[j2] > pk2) pk2 = gpks[j2];
       j2++;
     }
-    if ((j2 - i2) * G >= 10) runs.push({ a: i2 * G, b: j2 * G, len: (j2 - i2) * G, peak: pk2, lt: tt === 'chill' ? 1 : 0 });
+    if ((j2 - i2) * G >= 10) runs.push({ a: i2 * G, b: j2 * G, len: (j2 - i2) * G, peak: pk2, lt: 0 });
     i2 = j2;
   }
   // 只统计「今天」：段跨零点就截到今天 0 点起算，纯昨天的不显示（截完不足 10 分钟也丢）
@@ -2508,11 +2538,11 @@ function anRender(j){
   runs = runs2;
   runs.reverse();   // 按时间倒序：最新的一段排最上面
   var sb = document.getElementById('anSleepBody');
-  if (!runs.length) { sb.innerHTML = '<tr><td colspan="4" class="hint">今天还没出现 ≥10 分钟的轻量/空闲时段</td></tr>'; }
+  if (!runs.length) { sb.innerHTML = '<tr><td colspan="4" class="hint">今天还没出现 ≥10 分钟的没使用时段</td></tr>'; }
   else {
     var shown = runs.slice(0, 40);
     sb.innerHTML = shown.map(function(r){
-      return '<tr><td class="num">' + anHMin(from + r.a * 60) + '–' + anHMin(from + r.b * 60) + '</td><td class="num">' + anFmtDur(r.len) + '</td><td class="sub">' + (r.lt ? '<span class="c-chill">轻量</span>' : '<span class="c-idle">空闲</span>') + '</td><td class="num">' + fmtRate10(r.peak) + '</td></tr>';
+      return '<tr><td class="num">' + anHMin(from + r.a * 60) + '–' + anHMin(from + r.b * 60) + '</td><td class="num">' + anFmtDur(r.len) + '</td><td class="sub">' + '<span class="c-muted">没使用</span>' + '</td><td class="num">' + fmtRate10(r.peak) + '</td></tr>';
     }).join('') + (runs.length > 40 ? '<tr><td colspan="4" class="hint">还有 ' + (runs.length - 40) + ' 段未显示</td></tr>' : '');
   }
   document.getElementById('anSleepPanel').style.display = '';
@@ -2531,10 +2561,9 @@ function anRender(j){
     var avgV = ct2 ? tot / ct2 : 0;
     var pkV = pk1 ? (pk1[h3] || 0) : mx;
     var st;
-    if (!any2) st = '<span class="sub">无</span>';
-    else if (pkV >= AN_BUSY) st = '<span class="c-busy">繁忙</span>';
-    else if (pkV > 0) st = '<span class="c-chill">轻量</span>';
-    else st = '<span class="c-idle">空闲</span>';
+    if (!any2 || USE[h3] === undefined) st = '<span class="sub">无</span>';
+    else if (USE[h3]) st = '<span class="c-busy">使用</span>';
+    else st = '<span class="c-muted">没使用</span>';
     var t0 = from + h3 * 60, t1 = t0 + 60;
     // 行序即时间先后（由早到晚，索引 0 为窗口起点）
     var hlbl = anHMin(t0) + '–' + anHMin(t1);
@@ -2552,11 +2581,10 @@ function anRender(j){
     anSubEl.textContent = cutTitle(j.name || j.ip || AN.key, anFmtDur(n) + '窗口', 165);   // 顶栏限一行（按宽度）
     anSubEl.title = nmSub;
   }
-  document.getElementById('anDurBusy').textContent = anDur2(durMin.busy);
-  document.getElementById('anDurChill').textContent = anDur2(durMin.chill);
-  document.getElementById('anDurIdle').textContent = anDur2(durMin.idle);
+  document.getElementById('anDurUse').textContent = anDur2(durMin.used);
+  document.getElementById('anDurNot').textContent = anDur2(durMin.notused);
   document.getElementById('anDurNone').textContent = anDur2(durMin.none);
-  document.getElementById('anHint').textContent = '数据来自内网采集器的采样（约 10 秒一次，7×24 常驻）；柱状图与分时表均为每分钟一格（柱高=该分钟合计速率峰值）。';
+  document.getElementById('anHint').textContent = '数据来自内网采集器的采样（约 10 秒一次，7×24 常驻）；柱状图与分时表均为每分钟一格（柱高=该分钟合计速率峰值）；使用/没使用与「使用时间线」同一套判据（10 分钟桶），虚线只是 50 Kbps 速率参考。';
 }
 
 /* ===== 柱状图：双击进全屏（横屏）+ 点选时间点看数据 ===== */
