@@ -238,6 +238,11 @@ button, button *, .btn, .btn *, .tab, .tab * { -webkit-user-select:none; user-se
   .ugchk { color:var(--brand); flex:none; margin-right:6px; font-size:var(--fs-md); }
   #ugDevPop { max-height:262px; overflow-y:auto; }
   #ugDetail { padding-top:0; }
+  /* 使用时间线汇总：所选设备合并后，使用/没使用的总时长与时段 */
+  .ugsum { font-size:12px; line-height:1.75; color:#1f2630; padding:2px 0 4px; word-break:break-word; }
+  .ugsum .k { font-weight:650; }
+  .ugsum .k-u { color:#1d4ed8; }
+  .ugsum .k-n { color:#8a94a3; }
   #lvHint { text-align:center; }
   .chart { display:flex; align-items:flex-end; gap:1px; height:70px; margin:8px 0 2px; }
   .chart .b { flex:1; background:#bfdbfe; border-radius:1px 1px 0 0; position:relative; }
@@ -339,6 +344,7 @@ button, button *, .btn, .btn *, .tab, .tab * { -webkit-user-select:none; user-se
       <button type="button" onclick="ugLoad()" class="btn">刷新</button>
     </div>
     <div class="pbody mt-1"><svg id="ugChart" class="chart-svg"></svg></div>
+    <div class="ugsum" id="ugSum"></div>
     <div class="hint" id="ugDetail">点图中小点查看该 10 分钟的判定依据 · <span class="c-muted">彩=有人使用 灰=无人/自动 浅=无数据</span></div>
   </div>
   <div class="panel">
@@ -2328,6 +2334,8 @@ function ugRender(j){
   p.push('<rect id="ugSelMark" x="0" y="0" width="0" height="0" fill="none" stroke="#f59e0b" stroke-width="1" pointer-events="none" style="display:none"/>');
   svg.innerHTML = p.join('');
   UG.grid = grid; UG.geom = { padL: padL, bw: bw, padT: padT, rh: rh, nb: nb };
+  var sumEl = document.getElementById('ugSum');
+  if (sumEl) sumEl.innerHTML = ugSumText(ugSumCalc(grid, frm, nb));
   ugMsg(devs.length + ' 台 · 彩=有人 灰=无人 浅=无数据');
 }
 function anLoad(){
@@ -2342,6 +2350,48 @@ function anLoad(){
 var AN_BUSY = 204800;     // 「繁忙」阈值 = 合计（上行+下行）峰值 ≥ 200 K/s（200×1024）；柱色、虚线、分时用量状态共用这一个值
 function anDayLbl(sec){ var d = new Date(sec * 1000); return (d.getMonth() + 1) + '-' + d.getDate(); }
 function anHMin(sec){ var d = new Date(sec * 1000); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
+/* 时间线汇总：把所选设备合并（任一台有人用=这段在用），连续桶并成区间 */
+function ugSumCalc(grid, frm, nb){
+  var segU = [], segN = [], dataB = 0;
+  for (var c = 0; c < nb; c++){
+    var hasD = false, used = false;
+    for (var r = 0; r < grid.length; r++){
+      var rr = grid[r] && grid[r][c];
+      if (!rr || !rr.b) continue;
+      hasD = true;
+      if (rr.v && rr.v.used) used = true;
+    }
+    if (!hasD) continue;
+    dataB++;
+    var t0 = frm + c * 600, t1 = t0 + 600, cur = used ? segU : segN;
+    if (cur.length && cur[cur.length - 1][1] === t0) cur[cur.length - 1][1] = t1;
+    else cur.push([t0, t1]);
+  }
+  return { used: segU, idle: segN, dataB: dataB, nb: nb };
+}
+function ugDurCn(min){
+  min = Math.round(min);
+  var h = Math.floor(min / 60), m = min % 60;
+  if (!h) return m + '分钟';
+  return h + '小时' + (m ? m + '分钟' : '');
+}
+function ugSegTxt(segs, max){
+  max = max || 12;
+  if (!segs.length) return '无';
+  var out = [];
+  for (var i = 0; i < segs.length && i < max; i++) out.push(anHMin(segs[i][0]) + '-' + anHMin(segs[i][1]));
+  return out.join(',') + (segs.length > max ? '…等 ' + segs.length + ' 段' : '');
+}
+function ugSumText(sc){
+  var u = 0, n = 0, i;
+  for (i = 0; i < sc.used.length; i++) u += (sc.used[i][1] - sc.used[i][0]) / 60;
+  for (i = 0; i < sc.idle.length; i++) n += (sc.idle[i][1] - sc.idle[i][0]) / 60;
+  var t = '<span class="k k-u">使用</span>：' + ugDurCn(u) + '，' + ugSegTxt(sc.used) +
+          '<br><span class="k k-n">没使用</span>：' + ugDurCn(n) + '，' + ugSegTxt(sc.idle);
+  var noData = sc.nb - sc.dataB;
+  if (noData > 0) t += '<br><span class="k k-n">无数据</span>：' + ugDurCn(noData * 10) + '（该段没有任何采样，不计入上面两项）';
+  return t;
+}
 function anDur2(min){ var h = Math.floor(min / 60), m = min % 60; return h + 'H' + (m < 10 ? '0' : '') + m + 'M'; }
 function anFmtDur(min){ if (min < 60) return Math.round(min) + '分'; return Math.floor(min / 60) + '时' + (Math.round(min % 60) ? Math.round(min % 60) + '分' : ''); }
 function anRender(j){
