@@ -1,1 +1,1 @@
-{"versionCode":191,"versionName":"3.80","size":2136630,"md5":"9d65c5dbb3e147670c64fd1602588c2e","note":"修复「实时」卡片可能永久停更：实时请求加10秒超时+15秒看门狗（连接僵死不再卡死刷新），回前台立即补刷一次（防浏览器后台节流）","apkUrl":"https://5130599.best/see/downloads/see-android.apk"}
+{"versionCode":192,"versionName":"3.81","size":2138222,"md5":"2b6528e407d5e8a428fc8cad5ae14b9e","note":"闲置判定按流量形态重做：新增「交互式应用（游戏/远程）」与「实时语音（低码率/静音段）」，大流量下载不再误判成人在使用，看视频不再被当成无人；场景卡与使用时间线同一套阈值","apkUrl":"https://5130599.best/see/downloads/see-android.apk"}
