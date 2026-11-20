@@ -1,1 +1,1 @@
-{"versionCode":192,"versionName":"3.81","size":2138222,"md5":"2b6528e407d5e8a428fc8cad5ae14b9e","note":"闲置判定按流量形态重做：新增「交互式应用（游戏/远程）」与「实时语音（低码率/静音段）」，大流量下载不再误判成人在使用，看视频不再被当成无人；场景卡与使用时间线同一套阈值","apkUrl":"https://5130599.best/see/downloads/see-android.apk"}
+{"versionCode":193,"versionName":"3.82","size":2138670,"md5":"f984b4b5fa3c37c585f613cd7056c333","note":"刷手机类小流量识别：小包密集但下行极小（如凌晨刷手机每窗 50 个小包、上行 4.7K/下行 1.5K）不再判成无人；低码率双向不再硬说成通话","apkUrl":"https://5130599.best/see/downloads/see-android.apk"}
