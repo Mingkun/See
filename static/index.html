@@ -275,6 +275,8 @@ button, button *, .btn, .btn *, .tab, .tab * { -webkit-user-select:none; user-se
   /* 柱状图：双击进全屏（横屏）+ 点选某个时间点看数据 */
   .chart-svg { touch-action: manipulation; }
   #chartTip { display:none; position:fixed; z-index:960; max-width:240px; background:rgba(17,24,39,.95); color:#fff; font-size:11px; line-height:1.55; padding:6px 9px; border-radius:8px; box-shadow:0 6px 18px rgba(15,23,42,.28); pointer-events:none; }
+  #anDetail { display:none; margin-top:4px; font-size:11px; color:#4b5563; line-height:1.6; background:#f4f6fa; border-radius:6px; padding:5px 8px; }
+  #anDetail b { color:#1f2630; }
   /* 进全屏时短暂提示（2.6s 后自动淡出），不是常驻按钮 */
   #chartFsHint { display:none; position:fixed; left:50%; bottom:22px; transform:translateX(-50%); z-index:965; background:rgba(17,24,39,.86); color:#fff; font-size:12px; line-height:1; padding:8px 12px; border-radius:999px; pointer-events:none; -webkit-tap-highlight-color:transparent; white-space:nowrap; }
   #chartFsHint.on { display:block; -webkit-animation: fshint 2.6s ease forwards; animation: fshint 2.6s ease forwards; }
@@ -360,7 +362,7 @@ button, button *, .btn, .btn *, .tab, .tab * { -webkit-user-select:none; user-se
       </div>
       <button type="button" onclick="anLoad()" class="btn">刷新</button>
     </div>
-    <div class="pbody mt-1"><svg id="anChart" class="chart-svg"></svg></div>
+    <div class="pbody mt-1"><svg id="anChart" class="chart-svg"></svg><div id="anDetail"></div></div>
     <div class="sub legend" id="anLeg3"><span class="c-busy">▬</span> 繁忙 · <span class="c-chill">▬</span> 轻量 · <span class="c-idle">▬</span> 空闲 · <span class="c-muted">▬</span> 无数据<br>繁忙:<span id="anDurBusy"></span>，轻量:<span id="anDurChill"></span><br>空闲:<span id="anDurIdle"></span>，无数据:<span id="anDurNone"></span></div>
     <div class="scn" id="anScene"><div class="scn-ev">最近 10 分钟场景分析：等待采样…</div></div>
   </div>
@@ -2406,7 +2408,8 @@ function anRender(j){
   var svg = document.getElementById('anChart');
   var W = svg.clientWidth || 340, H = svg.clientHeight || 190;
   svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
-  var padL = 34, padR = 6, padT = 10, padB = 18;
+  var fs = svg.classList.contains('chart-fs');   // 全屏：底部预留两行选点详情
+  var padL = 34, padR = 6, padT = 10, padB = fs ? 46 : 18;
   var iw = W - padL - padR, ih = H - padT - padB;
   var G = 1, groups = n;   // 每分钟一格（与 1 分钟采样对应；轻量时段阈值按分钟算不受影响）
   var PKTH = AN_BUSY;   // 「合计峰值」阈值：既判柱色，也是那条虚线的位置
@@ -2471,10 +2474,15 @@ function anRender(j){
     var yRef = yv(PKTH);
     p.push('<line x1="' + padL + '" y1="' + yRef.toFixed(1) + '" x2="' + (padL + iw) + '" y2="' + yRef.toFixed(1) + '" stroke="#e8c94f" stroke-width="1.2" stroke-dasharray="4 3" pointer-events="none"/>');
   }
-  if (svg.__sel != null && bars[svg.__sel]) p.push(chartMarkRect(bars[svg.__sel], padT, ih));
+  if (svg.__sel != null && bars[svg.__sel]) p.push(chartMarkLine(bars[svg.__sel], padL, W - padR, padT + ih));
+  if (fs){
+    p.push('<text id="anFsD1" x="' + padL + '" y="' + (H - 32) + '" font-size="12.5" font-weight="650" fill="#1f2630">点柱子查看该分钟详情</text>');
+    p.push('<text id="anFsD2" x="' + padL + '" y="' + (H - 17) + '" font-size="10.5" fill="#69737f">双击退出全屏</text>');
+  }
   svg.__bars = bars;
   svg.innerHTML = p.join('');
   chartTipSync(svg);
+  if (svg.__sel != null && bars[svg.__sel]) chartBelowDetail(svg, bars[svg.__sel]);
   // 「轻量 + 空闲」时段：与「分时用量」完全同一套口径 —— 每分钟一格、按该格峰值
   // 分档（空闲=整格零流量、轻量=有流量但峰值 <AN_BUSY），连续 ≥10 分钟（10 格）才算。
   // 老逻辑按「分钟均速 <4KB/s」切，跟峰值口径对不上，已废弃（AN_THR 一并删除）。
@@ -2569,13 +2577,34 @@ var CHART_REDRAW = {
 function chartMarkRect(b, padT, ih){
   return '<rect id="chartSelMark" x="' + (b.x0 - 0.5).toFixed(2) + '" y="' + padT + '" width="' + Math.max(b.x1 - b.x0 + 1, 1).toFixed(2) + '" height="' + ih + '" fill="#f59e0b" fill-opacity="0.22" stroke="#f59e0b" stroke-width="0.8" pointer-events="none"/>';
 }
+function chartMarkLine(b, x1, x2, baseline){
+  var y = (b.yT != null) ? b.yT : baseline;
+  return '<line id="chartSelMark" x1="' + x1.toFixed(2) + '" y1="' + y.toFixed(2) + '" x2="' + x2.toFixed(2) + '" y2="' + y.toFixed(2) + '" stroke="#f59e0b" stroke-width="1.4" pointer-events="none"/>';
+}
 function chartMoveMark(svg, b){
   var el = svg.__markEl;
   if (!el || !el.parentNode) el = svg.querySelector('#chartSelMark');
   svg.__markEl = el;
   if (!el) return;
-  el.setAttribute('x', (b.x0 - 0.5).toFixed(2));
-  el.setAttribute('width', Math.max(b.x1 - b.x0 + 1, 1).toFixed(2));
+  if (el.tagName === 'line'){        // 分析图：横线标记 → 选点变化时上下移动
+    var yy = (b.yT != null ? b.yT : b.yB).toFixed(2);
+    el.setAttribute('y1', yy);
+    el.setAttribute('y2', yy);
+  } else {                           // 实时负载：竖框标记 → 左右移动
+    el.setAttribute('x', (b.x0 - 0.5).toFixed(2));
+    el.setAttribute('width', Math.max(b.x1 - b.x0 + 1, 1).toFixed(2));
+  }
+}
+function chartBelowDetail(svg, hb){
+  chartHideTip();
+  var dd = document.getElementById('an' + 'Detail');
+  if (dd){ dd.innerHTML = hb.tip; dd.style.display = ''; }
+  var segs = String(hb.tip || '').split(/<br\s*\/?>/i).map(function(x){ return x.replace(/<\/?b>/g, '').trim(); }).filter(Boolean);
+  var t1 = document.getElementById('an' + 'FsD1'), t2 = document.getElementById('an' + 'FsD2');
+  var l1 = segs.length >= 4 ? segs[0] + ' · ' + segs[1] : (segs[0] || '');
+  var l2 = segs.length >= 4 ? segs.slice(2).join(' · ') : segs.slice(1).join(' · ');
+  if (t1) t1.textContent = l1;
+  if (t2) t2.textContent = l2;
 }
 function chartTipEl(){ return document.getElementById('chart' + 'Tip'); }
 function chartTipSync(svg){
@@ -2618,6 +2647,7 @@ function chartSelectPoint(svgId, pt){
   }
   var hb = (svg.__bars || [])[idx]; if (!hb) return;
   chartMoveMark(svg, hb);
+  if (svgId === 'anChart'){ chartBelowDetail(svg, hb); return; }   // 分析图：详情固定显示在图下方
   var tip = chartTipEl(); if (!tip) return;
   tip.innerHTML = hb.tip;
   tip.style.display = 'block';
