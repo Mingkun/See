@@ -100,19 +100,50 @@ class MainActivity : Activity() {
         pendingApkMd5 = (md5 ?: "").trim().lowercase()
         purgeStaleApks(dest)
         Thread {
-            try {
-                val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
-                conn.connectTimeout = 15000; conn.readTimeout = 60000
-                conn.setRequestProperty("User-Agent", "Mozilla/5.0")
-                val file = java.io.File(getExternalFilesDir(null), dest)
-                java.io.FileOutputStream(file).use { output -> conn.inputStream.use { input -> input.copyTo(output) } }
-                conn.disconnect()
-                runOnUiThread { openDownloadedApk() }
-            } catch (e: Exception) {
-                runOnUiThread { android.widget.Toast.makeText(this@MainActivity, "下载失败: " + (e.message ?: "?"), android.widget.Toast.LENGTH_LONG).show() }
+            // 断点续传 + 自动重试：跨境链路传输常被中途掐断（一次直连丢包即全废），
+            // 断了就从已下字节发 Range 续传，最多 8 轮；服务器不认 Range（回 200）就整包重来。
+            val file = java.io.File(getExternalFilesDir(null), dest)
+            val maxAttempts = 8
+            var done = false
+            var lastErr = ""
+            for (attempt in 1..maxAttempts) {
+                try {
+                    val have = if (file.exists()) file.length() else 0L
+                    if (pendingApkSize > 0 && have == pendingApkSize) { done = true; break }
+                    val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+                    conn.connectTimeout = 15000; conn.readTimeout = 60000
+                    conn.setRequestProperty("User-Agent", "Mozilla/5.0")
+                    if (have > 0) conn.setRequestProperty("Range", "bytes=" + have + "-")
+                    val code = conn.responseCode
+                    if (code == 416 && file.exists()) { try { file.delete() } catch (_: Exception) {} }
+                    if (code != 200 && code != 206) {
+                        lastErr = "HTTP " + code; conn.disconnect()
+                        Thread.sleep(1500); continue
+                    }
+                    val append = (code == 206 && have > 0)
+                    if (!append && file.exists()) { try { file.delete() } catch (_: Exception) {} }
+                    val out = java.io.FileOutputStream(file, append)
+                    conn.inputStream.use { input -> out.use { output -> input.copyTo(output, 16384) } }
+                    conn.disconnect()
+                    if (pendingApkSize <= 0) { done = true; break }
+                    if (file.length() == pendingApkSize) { done = true; break }
+                    lastErr = "传输中断(" + file.length() + "/" + pendingApkSize + " 字节)"
+                    Thread.sleep(1000)
+                } catch (e: Exception) {
+                    lastErr = e.message ?: "?"
+                    try { Thread.sleep(1500) } catch (_: InterruptedException) {}
+                }
+            }
+            val ok = done || (pendingApkSize > 0 && file.exists() && file.length() == pendingApkSize)
+            runOnUiThread {
+                if (ok) openDownloadedApk()
+                else {
+                    try { file.delete() } catch (_: Exception) {}
+                    android.widget.Toast.makeText(this@MainActivity, "下载失败: " + lastErr + "（已重试 " + maxAttempts + " 轮，建议用手机浏览器直接下载安装）", android.widget.Toast.LENGTH_LONG).show()
+                }
             }
         }.start()
-        android.widget.Toast.makeText(this, "see 开始下载更新…", android.widget.Toast.LENGTH_SHORT).show()
+        android.widget.Toast.makeText(this, "see 开始下载更新（断点自动续传）…", android.widget.Toast.LENGTH_SHORT).show()
     }
 
     private fun openDownloadedApk() {
