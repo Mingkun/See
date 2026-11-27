@@ -9,6 +9,7 @@
   （启动时间=往前回溯最近一个繁忙分钟的后一分钟，最多回看 12 小时）
 - 休息中设备离线不误判结束；结束=自上次检查(含10分钟重叠)以来出现 >=3 个繁忙分钟
   （结束时间=该窗口内第一个繁忙分钟；孤立 1-2 分钟的抖动不触发）
+设备按「名字」跟踪：同一台设备 DHCP 换 IP 时自动并入（devkey=IP 会变，名字不变）
 状态文件 data/rest-watch-state.json：{devkey, name, resting, since, checked_at}
 输出一行 JSON：{action: start|stop|none, message, state, checked_at}
 测试：--now <epoch> --state-file <path>（不影响生产状态文件）
@@ -26,6 +27,7 @@ ROOT = "/work/see"
 DB = ROOT + "/data/see.db"
 STATE_FILE = ROOT + "/data/rest-watch-state.json"
 BUSY = 25000          # 繁忙线（字节/10秒）= 合计峰值 20Kbps
+TARGET_NAME = "iPhone 16 Pro"  # 监控设备名（devkey=IP 会因 DHCP 变化，故按名字跟踪）
 START_MIN = 10        # 休息启动：连续静默分钟数（用户 2026-11-26 起改为 10 分钟）
 START_ONLINE = 5      # 其中需「在线低位」的分钟数（防采集器停报误判）
 END_BUSY = 3          # 休息结束：窗口内繁忙分钟数（滤掉 1-2 分钟的孤立抖动）
@@ -55,25 +57,34 @@ def main() -> int:
         st = json.load(open(args.state_file, encoding="utf-8"))
     except Exception:
         st = {}
-    devkey = args.devkey or st.get("devkey")
-    if not devkey:
-        print(json.dumps({"action": "none", "message": "", "state": st,
-                          "checked_at": now, "note": "未配置 devkey"}, ensure_ascii=False))
-        return 0
-
+    name = st.get("name") or TARGET_NAME
     conn = sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=20)
-    name = st.get("name") or ""
-    if not name:
-        r = conn.execute("SELECT MAX(name) FROM gw_samples WHERE devkey=?", (devkey,)).fetchone()
-        name = (r[0] if r and r[0] else "") or devkey
+    # 同一台设备可能因 DHCP 换 IP（实例：192.168.1.58 于 11-27 02:09 换成 192.168.1.35），按名字聚合
+    dks = {r[0] for r in conn.execute(
+        "SELECT devkey FROM gw_samples WHERE name=? AND ts>=? GROUP BY devkey",
+        (name, now - 7 * 86400))}
+    if args.devkey:
+        dks.add(args.devkey)
+    elif st.get("devkey"):
+        dks.add(st["devkey"])
+    if not dks:
+        print(json.dumps({"action": "none", "message": "", "state": st,
+                          "checked_at": now, "note": f"未找到设备 {name}"}, ensure_ascii=False))
+        return 0
+    marks = ",".join("?" * len(dks))
     rows = {r[0]: (r[1] or 0, r[2] or 0) for r in conn.execute(
-        "SELECT (ts/60)*60 m, MAX(up+down) peak, MAX(present) pres "
-        "FROM gw_samples WHERE devkey=? AND ts>=? AND ts<=? GROUP BY m",
-        (devkey, now - LOOKBACK, now + 60))}
+        f"SELECT (ts/60)*60 m, MAX(up+down) peak, MAX(present) pres "
+        f"FROM gw_samples WHERE devkey IN ({marks}) AND ts>=? AND ts<=? GROUP BY m",
+        (*dks, now - LOOKBACK, now + 60))}
     other_minutes = {
         r[0] for r in conn.execute(
-            "SELECT DISTINCT (ts/60)*60 FROM gw_samples WHERE devkey<>? AND ts>=? AND ts<=?",
-            (devkey, now - 60 * (START_MIN + 10), now + 60))}
+            f"SELECT DISTINCT (ts/60)*60 FROM gw_samples WHERE devkey NOT IN ({marks}) "
+            f"AND ts>=? AND ts<=?",
+            (*dks, now - 60 * (START_MIN + 10), now + 60))}
+    last = conn.execute(
+        f"SELECT devkey FROM gw_samples WHERE devkey IN ({marks}) AND present=1 "
+        f"ORDER BY ts DESC LIMIT 1", (*dks,)).fetchone()
+    devkey = last[0] if last else sorted(dks)[0]
     conn.close()
 
     def verdict(m: int) -> str:
@@ -119,12 +130,20 @@ def main() -> int:
                        f"（已连续静默 {(end_m - start) // 60 + 1} 分钟，{seg_txt}）")
             resting, since = True, start
     else:
-        # —— 休息结束检测：自上次检查（往前重叠 10 分钟）以来 ——
-        since_chk = min(int(st.get("checked_at") or since or now - 600), now)
-        win_lo = ((min(since_chk, m0) - 600) // 60) * 60
-        busy_ms = [m for m in range(win_lo, m0 + 60, 60) if verdict(m) == "busy"]
-        if len(busy_ms) >= END_BUSY:
-            end = busy_ms[0]
+        # —— 休息结束检测：自休息开始以来，出现 >=END_BUSY 个繁忙分钟的簇即结束 ——
+        # 不用「上次检查」窗口：网关停机/漏跑一轮时窗口会漏掉真正的醒来时刻
+        lo = max(since or now - 600, now - LOOKBACK)
+        lo_m = (lo // 60) * 60
+        busy_ms = [m for m in range(lo_m, m0, 60) if verdict(m) == "busy"]
+        clusters = []
+        for m in busy_ms:
+            if clusters and m - clusters[-1][-1] <= 600:
+                clusters[-1].append(m)
+            else:
+                clusters.append([m])
+        hit = next((c for c in clusters if len(c) >= END_BUSY), None)
+        if hit:
+            end = hit[0]
             action = "stop"
             dur = fmt_dur(end - since) if since else "?"
             message = (f"⏰ 休息监控：{name} 于 {fmt_hm(end)} 结束休息"
