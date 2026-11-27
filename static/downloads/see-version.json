@@ -1,1 +1,1 @@
-{"versionCode": 201, "versionName": "3.90", "size": 2141350, "md5": "1f0caa3ae47d9914b0887f3e51e5d461", "note": "更新下载器修复：断点续传+自动重试8轮（解决跨境下载中断）；含3.89图表改进（选点详情下方显示+横线标记）", "apkUrl": "https://5130599.best/see/downloads/see-android-v3.90.apk"}
+{"versionCode": 202, "versionName": "3.91", "size": 2141722, "md5": "774bf5e3d6eef38f315cc9a3092090cd", "note": "流量负载分析选点新增十字线（x线+y线，全屏同样显示）", "apkUrl": "https://5130599.best/see/downloads/see-android-v3.91.apk"}

@@ -2474,7 +2474,7 @@ function anRender(j){
     var yRef = yv(PKTH);
     p.push('<line x1="' + padL + '" y1="' + yRef.toFixed(1) + '" x2="' + (padL + iw) + '" y2="' + yRef.toFixed(1) + '" stroke="#e8c94f" stroke-width="1.2" stroke-dasharray="4 3" pointer-events="none"/>');
   }
-  if (svg.__sel != null && bars[svg.__sel]) p.push(chartMarkLine(bars[svg.__sel], padL, W - padR, padT + ih));
+  if (svg.__sel != null && bars[svg.__sel]) p.push(chartMarkLine(bars[svg.__sel], padL, W - padR, padT + ih, padT));
   if (fs){
     p.push('<text id="anFsD1" x="' + padL + '" y="' + (H - 32) + '" font-size="12.5" font-weight="650" fill="#1f2630">点柱子查看该分钟详情</text>');
     p.push('<text id="anFsD2" x="' + padL + '" y="' + (H - 17) + '" font-size="10.5" fill="#69737f">双击退出全屏</text>');
@@ -2577,16 +2577,30 @@ var CHART_REDRAW = {
 function chartMarkRect(b, padT, ih){
   return '<rect id="chartSelMark" x="' + (b.x0 - 0.5).toFixed(2) + '" y="' + padT + '" width="' + Math.max(b.x1 - b.x0 + 1, 1).toFixed(2) + '" height="' + ih + '" fill="#f59e0b" fill-opacity="0.22" stroke="#f59e0b" stroke-width="0.8" pointer-events="none"/>';
 }
-function chartMarkLine(b, x1, x2, baseline){
+function chartMarkLine(b, x1, x2, baseline, padT){
+  // 选点十字线：竖线=该点时间（柱子中心），横线=该点峰值高度，交点一个小圆点
   var y = (b.yT != null) ? b.yT : baseline;
-  return '<line id="chartSelMark" x1="' + x1.toFixed(2) + '" y1="' + y.toFixed(2) + '" x2="' + x2.toFixed(2) + '" y2="' + y.toFixed(2) + '" stroke="#f59e0b" stroke-width="1.4" pointer-events="none"/>';
+  var cx = (b.x0 + b.x1) / 2;
+  var top = (padT != null) ? padT : y;
+  return '<g id="chartSelMark" pointer-events="none">'
+    + '<line class="selv" x1="' + cx.toFixed(2) + '" y1="' + top.toFixed(2) + '" x2="' + cx.toFixed(2) + '" y2="' + baseline.toFixed(2) + '" stroke="#f59e0b" stroke-width="1" stroke-dasharray="3 2.2" stroke-opacity="0.9"/>'
+    + '<line class="selh" x1="' + x1.toFixed(2) + '" y1="' + y.toFixed(2) + '" x2="' + x2.toFixed(2) + '" y2="' + y.toFixed(2) + '" stroke="#f59e0b" stroke-width="1.2" stroke-dasharray="3 2.2" stroke-opacity="0.95"/>'
+    + '<circle class="seld" cx="' + cx.toFixed(2) + '" cy="' + y.toFixed(2) + '" r="2.6" fill="#f59e0b"/>'
+    + '</g>';
 }
 function chartMoveMark(svg, b){
   var el = svg.__markEl;
   if (!el || !el.parentNode) el = svg.querySelector('#chartSelMark');
   svg.__markEl = el;
   if (!el) return;
-  if (el.tagName === 'line'){        // 分析图：横线标记 → 选点变化时上下移动
+  if (el.tagName === 'g'){          // 分析图：十字线标记 → 左右/上下同时跟随
+    var cx2 = ((b.x0 + b.x1) / 2).toFixed(2);
+    var yy2 = (b.yT != null ? b.yT : b.yB).toFixed(2);
+    var lv = el.querySelector('.selv'), lh = el.querySelector('.selh'), dt = el.querySelector('.seld');
+    if (lv){ lv.setAttribute('x1', cx2); lv.setAttribute('x2', cx2); }
+    if (lh){ lh.setAttribute('y1', yy2); lh.setAttribute('y2', yy2); }
+    if (dt){ dt.setAttribute('cx', cx2); dt.setAttribute('cy', yy2); }
+  } else if (el.tagName === 'line'){  // 旧版单横线标记（兼容）
     var yy = (b.yT != null ? b.yT : b.yB).toFixed(2);
     el.setAttribute('y1', yy);
     el.setAttribute('y2', yy);
