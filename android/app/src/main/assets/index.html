@@ -2098,7 +2098,7 @@ function anSceneRender(j){
    数据来自 /gw/usegrid：服务端按 10 分钟桶预计算指标（口径与场景分析一致），
    前端只做判定与画图。阈值与 anSceneVerdict 同一套：
    上行小包≥2 即有人（前台活跃也算）；对称连续（通话形态）必然有人；合计<1.5K/s=待机。 */
-var UG = { devs: [], win: 24, last: null, inited: false, grid: null, geom: null };
+var UG = { devs: [], win: 24, last: null, inited: false, grid: null, geom: null, seq: 0, orphans: [] };
 var UG_COLORS = ['#2563eb', '#16a34a', '#f59e0b', '#dc2626', '#7c3aed', '#0891b2', '#db2777', '#65a30d'];
 function ugMsg(t){ var e = document.getElementById('ugSub'); if (e) e.textContent = t; }
 function ugVerdict(b){
@@ -2134,24 +2134,35 @@ function ugVerdict(b){
     return content ? { t: '前台活跃', used: 1 } : { t: '无交互（自动/后台）', used: 0 };
   return { t: '无交互（自动/后台）', used: 0 };
 }
+function ugDevList(){
+  // 当前可选设备 = 近 48h 活跃列表 + 仍被勾选但已不在列表里的旧 key（置底，仍可取消勾选）
+  var items = (AN.devs || []).slice(), orph = UG.orphans || [];
+  for (var i = 0; i < orph.length; i++){
+    var has = false;
+    for (var j = 0; j < items.length; j++) if (items[j].key === orph[i]) { has = true; break; }
+    if (!has) items.push({ key: orph[i], name: '', ip: '', orphan: true });
+  }
+  return items;
+}
 function ugDevItems(){
   var pop = document.getElementById('ugDevPop'); if (!pop) return;
-  pop.innerHTML = (AN.devs || []).map(function(k, i){
+  pop.innerHTML = ugDevList().map(function(k, i){
     var on = UG.devs.indexOf(k.key) >= 0;
-    return '<div class="ddopt ugopt" onclick="ugPickDev(' + i + ')"><span class="ugchk">' + (on ? '☑' : '☐') + '</span>' + anDevLabelHtml(k) + '</div>';
+    var lab = k.orphan ? esc(k.key) + '（已无近期采样）' : anDevLabelHtml(k);
+    return '<div class="ddopt ugopt" onclick="ugPickDev(' + i + ')"><span class="ugchk">' + (on ? '☑' : '☐') + '</span>' + lab + '</div>';
   }).join('');
 }
 function ugDevLabel(){
   var lab = document.getElementById('ugDevLab'); if (!lab) return;
   if (!UG.devs.length){ lab.textContent = '选择设备…'; return; }
   if (UG.devs.length === 1){
-    var k = null;
-    for (var i = 0; i < (AN.devs || []).length; i++) if (AN.devs[i].key === UG.devs[0]) k = AN.devs[i];
+    var k = null, lst = ugDevList();
+    for (var i = 0; i < lst.length; i++) if (lst[i].key === UG.devs[0]) k = lst[i];
     lab.textContent = k ? (k.name || k.ip || k.key) : UG.devs[0];
   } else lab.textContent = UG.devs.length + ' 台设备';
 }
 function ugPickDev(i){
-  var k = (AN.devs || [])[i]; if (!k) return;
+  var k = ugDevList()[i]; if (!k) return;
   var at = UG.devs.indexOf(k.key);
   if (at >= 0) UG.devs.splice(at, 1);
   else {
@@ -2174,13 +2185,17 @@ function ugPickWin(i){
 }
 function ugInit(){
   UG.inited = true;
-  // 持久化恢复的设备若已不在近 48h 活跃列表里则剔除（设备退役/换 key 后不留僵尸行）
+  // 已不在近 48h 活跃列表里的旧勾选：不静默删除（否则看起来像「选中的设备少了一个」），
+  // 移到 UG.orphans 继续画空行，并在下拉里可手动取消
   if ((AN.devs || []).length && UG.devs.length){
-    var valid = [];
-    for (var q = 0; q < UG.devs.length; q++)
-      for (var q2 = 0; q2 < AN.devs.length; q2++) if (AN.devs[q2].key === UG.devs[q]) { valid.push(UG.devs[q]); break; }
-    UG.devs = valid;
-  }
+    var orph = [];
+    for (var q = 0; q < UG.devs.length; q++){
+      var hit = false;
+      for (var q2 = 0; q2 < AN.devs.length; q2++) if (AN.devs[q2].key === UG.devs[q]) { hit = true; break; }
+      if (!hit) orph.push(UG.devs[q]);
+    }
+    UG.orphans = orph;
+  } else UG.orphans = [];
   if (!UG.devs.length && AN.key) UG.devs = [AN.key];   // 空/全失效回落当前设备
   var wl = document.getElementById('ugWinLab');
   if (wl) for (var i = 0; i < AN_WINS.length; i++) if (AN_WINS[i][0] === UG.win) wl.textContent = AN_WINS[i][1];
@@ -2270,17 +2285,32 @@ function ugLoad(){
   if (!svg && !UG.devs.length) return;
   if (!UG.devs.length){ ugMsg('请选择设备'); if (svg) svg.innerHTML = ''; return; }
   ugMsg('加载中…');
-  apiFetch(API + '/gw/usegrid?devs=' + encodeURIComponent(UG.devs.join(',')) + '&hours=' + (UG.win || 24))
+  var seq = ++UG.seq;   // 只认最后一次请求：连点几台设备时，先发的旧响应不能回滚行数
+  apiFetch(API + '/gw/usegrid?devs=' + encodeURIComponent(UG.devs.join(',')) + '&hours=' + (UG.win || 24), { cache: 'no-store' })
     .then(function(r){ return r.json(); })
     .then(function(j){
+      if (seq !== UG.seq) return;
       if (!j || !j.ok){ ugMsg('⚠ ' + ((j && j.error) || '失败')); return; }
       UG.last = j; ugRender(j);
     })
-    .catch(function(){ ugMsg('⚠ 服务器连接失败'); });
+    .catch(function(){ if (seq === UG.seq) ugMsg('⚠ 服务器连接失败'); });
 }
 function ugRender(j){
   var svg = document.getElementById('ugChart'); if (!svg) return;
   var devs = j.devs || [];
+  // 行数以下拉里的当前勾选为准：响应漏回某台时保留该行（显示为无数据），避免选中的设备凭空消失
+  if (UG.devs && UG.devs.length){
+    var byKey = {}, sel = [], si;
+    for (si = 0; si < devs.length; si++) byKey[String(devs[si].key)] = devs[si];
+    for (si = 0; si < UG.devs.length; si++){
+      var kk = String(UG.devs[si]), hit = byKey[kk];
+      if (hit){ sel.push(hit); continue; }
+      var nmx = '', lst2 = ugDevList();
+      for (var li = 0; li < lst2.length; li++) if (String(lst2[li].key) === kk) { nmx = lst2[li].name || lst2[li].ip || ''; break; }
+      sel.push({ key: kk, name: nmx, ip: '', bk: [] });
+    }
+    devs = sel;
+  }
   var nb = j.nb || 1, frm = j.frm || ((j.now || Math.floor(Date.now() / 1000)) - nb * 600);
   var fs = (CHART_FS === 'ugChart');
   if (fs) svg.style.height = '';   // 先清 inline 高度，否则它会盖住 .chart-fs 的 100vh，量不到全屏尺寸

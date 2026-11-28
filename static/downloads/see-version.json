@@ -1,1 +1,1 @@
-{"versionCode": 202, "versionName": "3.91", "size": 2141722, "md5": "774bf5e3d6eef38f315cc9a3092090cd", "note": "流量负载分析选点新增十字线（x线+y线，全屏同样显示）", "apkUrl": "https://5130599.best/see/downloads/see-android-v3.91.apk"}
+{"versionCode":203,"versionName":"3.92","size":2142498,"md5":"1559223fe73587ba2e85705ab4ce7b8c","note":"使用时间线修复：连续勾选设备时旧的响应不再覆盖，行数始终等于当前勾选；已不在近 48h 列表的旧设备改为保留空行并可在下拉里取消（不再静默少一台）","apkUrl":"https://5130599.best/see/downloads/see-android-v3.92.apk"}
